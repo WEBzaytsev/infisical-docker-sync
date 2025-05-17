@@ -1,7 +1,7 @@
 import { loadConfig } from './config-loader.js';
 import { fetchEnv } from './infisical-client.js';
 import { hasChanged, ensureEnvDir } from './env-watcher.js';
-import { reloadContainer } from './docker-manager.js';
+import { reloadService } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
 import { setLogLevel, info, debug, error, warn } from './logger.js';
 import fs from 'fs/promises';
@@ -39,7 +39,12 @@ async function syncService(service, globalConfig) {
     if (changed) {
       info(`📝 Обновление ${Object.keys(envVars).length} переменных для ${service.name}`);
       await fs.writeFile(service.envPath, envText);
-      await reloadContainer(service.container);
+      
+      // Получаем политику перезагрузки (приоритет: настройка сервиса -> глобальная настройка -> по умолчанию recreate)
+      const reloadPolicy = service.reloadPolicy || globalConfig.defaultReloadPolicy || 'recreate';
+      info(`🔄 Используем политику перезагрузки: ${reloadPolicy}`);
+      
+      await reloadService(service, reloadPolicy);
     } else {
       info(`✅ Переменные для ${service.name} не изменились (${Object.keys(envVars).length} переменных)`);
     }

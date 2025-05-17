@@ -85,4 +85,18 @@ export async function reloadContainer(containerName) {
   } catch (err) {
     error(`Ошибка при пересоздании ${containerName}: ${err.message}`);
   }
+}
+
+export async function reloadService(service, reloadPolicy) {
+  const policy = reloadPolicy || 'recreate';
+  
+  switch (policy) {
+    case 'restart':
+      await restartContainer(service.container);
+      break;
+    case 'recreate':
+    default:
+      await reloadContainer(service.container);
+      break;
+  }
 } 
