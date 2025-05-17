@@ -1,7 +1,7 @@
 import { loadConfig } from './config-loader.js';
 import { fetchEnv } from './infisical-client.js';
 import { hasChanged, ensureEnvDir } from './env-watcher.js';
-import { restartContainer } from './docker-manager.js';
+import { reloadContainer } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
 import { setLogLevel, info, debug, error, warn } from './logger.js';
 import fs from 'fs/promises';
@@ -39,7 +39,7 @@ async function syncService(service, globalConfig) {
     if (changed) {
       info(`📝 Обновление ${Object.keys(envVars).length} переменных для ${service.name}`);
       await fs.writeFile(service.envPath, envText);
-      await restartContainer(service.container);
+      await reloadContainer(service.container);
     } else {
       info(`✅ Переменные для ${service.name} не изменились (${Object.keys(envVars).length} переменных)`);
     }
