@@ -56,12 +56,10 @@ export async function loadConfig(configPath) {
       throw new Error(`Ошибка валидации конфигурации: ${error.message}`);
     }
     
-    // Определяем базовую директорию для .env файлов - теперь это /app/envs
-    const envsDir = '/app/envs';
-    
     // Автоматически добавляем полный путь к env файлам
     for (const service of value.services) {
-      service.envPath = path.join(envsDir, service.envFile);
+      const serviceDir = path.join('/app/envs', service.name);
+      service.envPath = path.join(serviceDir, service.envFile);
       console.log(`🔍 Файл .env для ${service.name}: ${service.envPath}`);
     }
     
