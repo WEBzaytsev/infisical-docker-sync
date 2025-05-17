@@ -10,7 +10,7 @@ const schema = Joi.object({
   clientSecret: Joi.string().required(),
   syncInterval: Joi.number().integer().min(10).description('Интервал проверки обновлений в секундах').default(60),
   logLevel: Joi.string().valid(...Object.values(LOG_LEVELS)).description('Уровень логирования (debug, info, none)').default(LOG_LEVELS.INFO),
-  defaultReloadPolicy: Joi.string().valid('restart', 'recreate').description('Политика перезагрузки по умолчанию').default('recreate'),
+  defaultReloadPolicy: Joi.string().valid('restart', 'recreate', 'compose').description('Политика перезагрузки по умолчанию').default('recreate'),
   services: Joi.array().items(
     Joi.object({
       name: Joi.string().required(),
@@ -19,7 +19,7 @@ const schema = Joi.object({
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
       syncInterval: Joi.number().integer().min(10).description('Переопределение интервала для конкретного сервиса'),
-      reloadPolicy: Joi.string().valid('restart', 'recreate').description('Политика перезагрузки для сервиса'),
+      reloadPolicy: Joi.string().valid('restart', 'recreate', 'compose').description('Политика перезагрузки для сервиса'),
       overrides: Joi.object({
         siteUrl: Joi.string().uri(),
         clientId: Joi.string(),
