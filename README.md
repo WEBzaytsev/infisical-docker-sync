@@ -30,7 +30,7 @@ version: '3.8'
 
 services:
   infisical-docker-sync:
-    image: ghcr.io/yourusername/infisical-docker-sync:latest
+    image: ghcr.io/webzaytsev/infisical-docker-sync:latest
     container_name: infisical-docker-sync
     volumes:
       - ./config.yaml:/app/config.yaml
@@ -116,7 +116,7 @@ docker ps | grep infisical-docker-sync
 docker-compose down
 
 # Обновите образ
-docker pull ghcr.io/yourusername/infisical-docker-sync:latest
+docker pull ghcr.io/webzaytsev/infisical-docker-sync:latest
 
 # Запустите снова
 docker-compose up -d
