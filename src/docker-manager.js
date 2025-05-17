@@ -2,6 +2,9 @@ import Docker from 'dockerode';
 import { info, error, debug } from './logger.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
+import DockerodeCompose from 'dockerode-compose';
+import fs from 'fs';
 
 const execAsync = promisify(exec);
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
@@ -90,7 +93,7 @@ export async function reloadContainer(containerName) {
   }
 }
 
-export async function reloadWithCompose(containerName) {
+export async function reloadWithCompose(containerName, envPath) {
   try {
     // Ищем информацию о контейнере
     const containers = await docker.listContainers({
@@ -119,32 +122,129 @@ export async function reloadWithCompose(containerName) {
     
     // Получаем информацию о compose-проекте из меток
     const composeProject = labels['com.docker.compose.project'];
-    const composeService = labels['com.docker.compose.service'];
-    const composeWorkingDir = labels['com.docker.compose.project.working_dir'];
+    const composeService = labels['com.docker.compose.service'] || '';
+    const composeWorkingDir = labels['com.docker.compose.project.working_dir'] || '';
     
-    if (!composeWorkingDir) {
-      error(`Не удалось определить рабочую директорию docker-compose для ${containerName}`);
+    info(`🔄 Пересоздание контейнера ${containerName} из проекта ${composeProject}`);
+    
+    // Пробуем напрямую изменить переменные окружения в контейнере
+    try {
+      // Получаем детальную информацию о контейнере
+      const container = docker.getContainer(containerInfo.Id);
+      const inspect = await container.inspect();
+      
+      info(`Обновляем переменные окружения в контейнере ${containerName}`);
+      
+      // Получаем текущие переменные окружения контейнера
+      const currentEnv = inspect.Config.Env || [];
+      info(`Текущие переменные окружения: ${currentEnv.length} шт`);
+      
+      // Читаем обновленный .env файл
+      try {
+        info(`Путь к .env файлу: ${envPath}`);
+        
+        if (envPath && fs.existsSync(envPath)) {
+          const envContent = fs.readFileSync(envPath, 'utf8');
+          const envVars = {};
+          
+          // Парсим .env файл в объект
+          envContent.split('\n').forEach(line => {
+            if (line && !line.startsWith('#')) {
+              const [key, ...valueParts] = line.split('=');
+              if (key) {
+                envVars[key.trim()] = valueParts.join('=').trim();
+              }
+            }
+          });
+          
+          info(`Прочитано ${Object.keys(envVars).length} переменных из .env файла ${envPath}`);
+          
+          // Создаем новый массив переменных окружения, сохраняя нетронутыми те, 
+          // которые не определены в .env, и обновляя те, которые определены
+          const updatedEnv = [];
+          const processedKeys = new Set();
+          
+          // Обновляем существующие переменные
+          for (const envVar of currentEnv) {
+            const [name, ...valueParts] = envVar.split('=');
+            const key = name.trim();
+            
+            if (envVars.hasOwnProperty(key)) {
+              // Если переменная есть в .env, обновляем значение
+              updatedEnv.push(`${key}=${envVars[key]}`);
+              processedKeys.add(key);
+            } else {
+              // Иначе оставляем как есть
+              updatedEnv.push(envVar);
+            }
+          }
+          
+          // Добавляем новые переменные из .env
+          for (const [key, value] of Object.entries(envVars)) {
+            if (!processedKeys.has(key)) {
+              updatedEnv.push(`${key}=${value}`);
+            }
+          }
+          
+          info(`Обновленные переменные окружения: ${updatedEnv.length} шт`);
+          
+          // Теперь пересоздаем контейнер с обновленными переменными
+          if (inspect.State.Running) {
+            info(`Останавливаем контейнер ${containerName}...`);
+            await container.stop();
+          }
+          
+          info(`Удаляем контейнер ${containerName}...`);
+          await container.remove();
+          
+          // Создаем новый контейнер с обновленными переменными окружения
+          const createOptions = {
+            name: containerName,
+            Image: containerInfo.Image,
+            Cmd: inspect.Config.Cmd,
+            Entrypoint: inspect.Config.Entrypoint,
+            Env: updatedEnv,  // Обновленные переменные окружения
+            Labels: inspect.Config.Labels,
+            HostConfig: {
+              Binds: inspect.HostConfig.Binds,
+              PortBindings: inspect.HostConfig.PortBindings,
+              NetworkMode: inspect.HostConfig.NetworkMode,
+              RestartPolicy: inspect.HostConfig.RestartPolicy,
+              Mounts: inspect.HostConfig.Mounts,
+              Devices: inspect.HostConfig.Devices,
+              CapAdd: inspect.HostConfig.CapAdd,
+              CapDrop: inspect.HostConfig.CapDrop
+            }
+          };
+          
+          // Создаем новый контейнер
+          const newContainer = await docker.createContainer(createOptions);
+          
+          // Запускаем контейнер если он был запущен
+          if (inspect.State.Running) {
+            info(`Запускаем контейнер ${containerName}...`);
+            await newContainer.start();
+          }
+          
+          info(`✅ Контейнер ${containerName} успешно пересоздан с обновленными переменными окружения`);
+          return;
+        } else {
+          info(`Путь к .env файлу не определен или файл не существует, используем стандартное пересоздание`);
+        }
+      } catch (envErr) {
+        error(`Ошибка при чтении .env файла: ${envErr.message}`);
+        info(`Используем стандартное пересоздание`);
+      }
+      
+      // Если не удалось прочитать/обновить переменные, просто пересоздаем контейнер
       await reloadContainer(containerName);
-      return;
-    }
-    
-    info(`🔄 Перезагрузка ${containerName} через docker-compose (проект: ${composeProject}, сервис: ${composeService})`);
-    
-    // Запускаем docker-compose up для конкретного сервиса
-    const command = `docker compose up -d ${composeService}`;
-    
-    info(`🔄 Выполняю команду: ${command} в ${composeWorkingDir}`);
-    const { stdout, stderr } = await execAsync(command, { cwd: composeWorkingDir });
-    
-    if (stderr && !stderr.includes('Creating') && !stderr.includes('Starting') && !stderr.includes('Recreated')) {
-      error(`Ошибка docker-compose: ${stderr}`);
-    } else {
-      info(`✅ docker-compose успешно выполнен`);
-      debug(stdout);
+    } catch (inspectErr) {
+      error(`Ошибка при получении информации о контейнере: ${inspectErr.message}`);
+      info(`Пробуем обычное пересоздание контейнера`);
+      await reloadContainer(containerName);
     }
   } catch (err) {
-    error(`Ошибка при перезагрузке через docker-compose: ${err.message}`);
-    info(`Пробуем fallback на recreate...`);
+    error(`Ошибка при работе с docker-compose: ${err.message}`);
     await reloadContainer(containerName);
   }
 }
@@ -157,7 +257,7 @@ export async function reloadService(service, reloadPolicy) {
       await restartContainer(service.container);
       break;
     case 'compose':
-      await reloadWithCompose(service.container);
+      await reloadWithCompose(service.container, service.envPath);
       break;
     case 'recreate':
     default:
