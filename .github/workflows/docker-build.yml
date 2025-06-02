@@ -35,8 +35,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=github.ref_name == 'main' || github.ref_name == 'master'
-            type=ref,event=branch,enable=github.ref_name != 'main' && github.ref_name != 'master'
+            type=raw,value=latest,enable=${{ github.ref_name == 'main' || github.ref_name == 'master' }}
+            type=ref,event=branch,enable=${{ github.ref_name != 'main' && github.ref_name != 'master' }}
             type=sha,format=short
           labels: |
             org.opencontainers.image.title=${{ env.IMAGE_NAME }}
