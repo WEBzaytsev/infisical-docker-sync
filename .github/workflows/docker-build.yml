@@ -3,7 +3,7 @@ name: Build and Push Docker Image
 on:
   push:
     branches:
-      - main
+      - '**'
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -35,7 +35,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{ github.ref_name == 'main' || github.ref_name == 'master' }}
+            type=ref,event=branch,enable={{ github.ref_name != 'main' && github.ref_name != 'master' }}
             type=sha,format=short
           labels: |
             org.opencontainers.image.title=${{ env.IMAGE_NAME }}
