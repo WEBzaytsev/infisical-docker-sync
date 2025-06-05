@@ -20,7 +20,8 @@ export async function fetchEnv({ siteUrl, clientId, clientSecret, projectId, env
       projectId,
       expandSecretReferences: true,
       viewSecretValue: true,
-      secretPath: '/'
+      secretPath: '/',
+      recursive: true
     });
 
     // Подробная отладка структуры ответа
