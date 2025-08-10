@@ -221,18 +221,18 @@ export async function reloadWithCompose(containerName, envPath) {
           info(`✅ Контейнер ${containerName} успешно пересоздан с обновленными переменными окружения`);
           return;
         } else {
-          info(`Путь к .env файлу не определен или файл не существует, используем стандартное пересоздание`);
+          info('Путь к .env файлу не определен или файл не существует, используем стандартное пересоздание');
         }
       } catch (envErr) {
         error(`Ошибка при чтении .env файла: ${envErr.message}`);
-        info(`Используем стандартное пересоздание`);
+        info('Используем стандартное пересоздание');
       }
       
       // Если не удалось прочитать/обновить переменные, просто пересоздаем контейнер
       await reloadContainer(containerName);
     } catch (inspectErr) {
       error(`Ошибка при получении информации о контейнере: ${inspectErr.message}`);
-      info(`Пробуем обычное пересоздание контейнера`);
+      info('Пробуем обычное пересоздание контейнера');
       await reloadContainer(containerName);
     }
   } catch (err) {
