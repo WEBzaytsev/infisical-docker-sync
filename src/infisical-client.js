@@ -1,5 +1,5 @@
 import { InfisicalSDK } from '@infisical/sdk';
-import { info, error, debug } from './logger.js';
+import { error, debug } from './logger.js';
 
 export async function fetchEnv({ siteUrl, clientId, clientSecret, projectId, environment }) {
   try {

@@ -1,12 +1,6 @@
 import Docker from 'dockerode';
-import { info, error, debug } from './logger.js';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import path from 'path';
-import DockerodeCompose from 'dockerode-compose';
+import { info, error } from './logger.js';
 import fs from 'fs';
-
-const execAsync = promisify(exec);
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 export async function restartContainer(containerName) {
@@ -122,8 +116,6 @@ export async function reloadWithCompose(containerName, envPath) {
     
     // Получаем информацию о compose-проекте из меток
     const composeProject = labels['com.docker.compose.project'];
-    const composeService = labels['com.docker.compose.service'] || '';
-    const composeWorkingDir = labels['com.docker.compose.project.working_dir'] || '';
     
     info(`🔄 Пересоздание контейнера ${containerName} из проекта ${composeProject}`);
     
@@ -166,7 +158,7 @@ export async function reloadWithCompose(containerName, envPath) {
           
           // Обновляем существующие переменные
           for (const envVar of currentEnv) {
-            const [name, ...valueParts] = envVar.split('=');
+            const [name] = envVar.split('=');
             const key = name.trim();
             
             if (envVars.hasOwnProperty(key)) {

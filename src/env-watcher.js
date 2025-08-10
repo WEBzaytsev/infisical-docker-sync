@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import path from 'path';
-import { info, error, debug } from './logger.js';
+import { info, error } from './logger.js';
 
 /**
  * Хеширование строки данных для определения изменений

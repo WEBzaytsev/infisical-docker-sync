@@ -1,5 +1,4 @@
 import chokidar from 'chokidar';
-import path from 'path';
 import { info, error, debug } from './logger.js';
 
 /**
