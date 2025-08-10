@@ -28,7 +28,7 @@ export async function fetchEnv({ siteUrl, clientId, clientSecret, projectId, env
     debug('Response type:', typeof response);
     if (typeof response === 'object') {
       debug('Response keys:', Object.keys(response));
-      if (response.secrets && response.secrets.length > 0) {
+      if (response?.secrets?.length > 0) {
         debug('Secret count:', response.secrets.length);
         // Полная структура первого секрета для анализа
         debug('Complete first secret:', JSON.stringify(response.secrets[0]));
@@ -38,9 +38,9 @@ export async function fetchEnv({ siteUrl, clientId, clientSecret, projectId, env
     // Обработка ответа и преобразование в объект ключ-значение
     const output = {};
     
-    if (response && Array.isArray(response.secrets)) {
+    if (Array.isArray(response?.secrets)) {
       response.secrets.forEach(secret => {
-        if (secret && secret.secretKey && secret.secretValue !== undefined) {
+        if (secret?.secretKey && secret.secretValue !== undefined) {
           output[secret.secretKey] = secret.secretValue;
         }
       });
