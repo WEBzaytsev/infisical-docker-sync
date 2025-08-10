@@ -7,10 +7,8 @@ RUN npm install --production
 
 COPY src/ ./src/
 
-# Создадим пустую директорию для конфига
-RUN mkdir -p /app/config
-# Создадим директорию для .env файлов
-RUN mkdir -p envs
+# Создадим директории для конфига и .env файлов одной командой
+RUN mkdir -p /app/config /app/envs
 
 # Монтируем директории для конфига и .env файлов
 VOLUME ["/app/config", "/app/envs", "/var/run/docker.sock"]
