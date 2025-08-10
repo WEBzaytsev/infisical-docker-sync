@@ -30,8 +30,6 @@ export async function fetchEnv({ siteUrl, clientId, clientSecret, projectId, env
       debug('Response keys:', Object.keys(response));
       if (response?.secrets?.length > 0) {
         debug('Secret count:', response.secrets.length);
-        // Полная структура первого секрета для анализа
-        debug('Complete first secret:', JSON.stringify(response.secrets[0]));
       }
     }
 
