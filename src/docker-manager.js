@@ -161,7 +161,7 @@ export async function reloadWithCompose(containerName, envPath) {
             const [name] = envVar.split('=');
             const key = name.trim();
             
-            if (envVars.hasOwnProperty(key)) {
+            if (Object.prototype.hasOwnProperty.call(envVars, key)) {
               // Если переменная есть в .env, обновляем значение
               updatedEnv.push(`${key}=${envVars[key]}`);
               processedKeys.add(key);
