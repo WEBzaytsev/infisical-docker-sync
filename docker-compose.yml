@@ -11,11 +11,9 @@ services:
     environment:
       - TZ=Europe/Moscow
       - CONFIG_PATH=/app/config.yaml
-    restart: unless-stopped
 
   test-server:
     image: nginx:alpine
     container_name: test_container
     ports:
       - "8080:80"
-    restart: unless-stopped 

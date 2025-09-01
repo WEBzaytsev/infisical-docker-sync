@@ -1,0 +1,54 @@
+siteUrl: "https://app.infisical.com"
+clientId: "your-client-id-from-infisical"
+clientSecret: "your-client-secret-from-infisical"
+syncInterval: 30
+logLevel: "info"
+
+services:
+  - container: "my-backend"
+    envFileName: ".env"
+    envDir: "/my-backend"  # смонтированная директория проекта
+    projectId: "11111111-2222-3333-4444-555555555555"
+    environment: "prod"
+    syncInterval: 120  # Переопределяем интервал для данного сервиса
+    overrides:
+      siteUrl: "https://custom.infisical.com"  # Переопределяем URL для данного сервиса
+    
+  - container: "my-worker"
+    envFileName: ".env"
+    envDir: "/my-backend"  # та же директория, что и проект
+    projectId: "66666666-7777-8888-9999-000000000000"
+    environment: "prod"
+    syncInterval: 30  # Более частая синхронизация для воркера
+    overrides:
+      clientId: "worker-specific-client-id"
+      clientSecret: "worker-specific-secret"
+
+  # Пример сервиса с минимальной конфигурацией
+  - container: "simple-app"
+    envFileName: ".env"
+    envDir: "/simple-app"
+    projectId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    environment: "dev"
+
+# Агент создает env файлы в смонтированных директориях:
+# /my-backend/.env
+#
+# Docker Compose в docker-compose.yml проекта может ссылаться на:
+# env_file: ./.env  
+# или
+# env_file: /path/to/project/.env
+#
+# Docker Compose для агента:
+# services:
+#   env-agent:
+#     image: ghcr.io/webzaytsev/infisical-docker-sync:latest
+#     volumes:
+#       - ./config.yaml:/app/config.yaml
+#       - /var/run/docker.sock:/var/run/docker.sock
+#       - ${HOME}/projects/my-backend:/my-backend  # проект + env файлы в одном месте!
+#     environment:
+#       - CONFIG_PATH=/app/config.yaml
+#
+# Кастомные пути: просто монтируй любые папки в агенте и указывай в envDir
+#

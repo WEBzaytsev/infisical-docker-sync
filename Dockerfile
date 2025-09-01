@@ -1,16 +1,55 @@
-FROM node:20-alpine
-
+# syntax=docker/dockerfile:1.7
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
-COPY package.json .
-RUN npm install --production
+# Ускоряем и фиксируем deps
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
 
-COPY src/ ./src/
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
 
-# Создадим директории для конфига и .env файлов одной командой
-RUN mkdir -p /app/config /app/envs
+# ——— Runtime ———
+FROM node:20-bookworm-slim AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /app
 
-# Монтируем директории для конфига и .env файлов
-VOLUME ["/app/config", "/app/envs", "/var/run/docker.sock"]
+# Устанавливаем bash с pipefail для безопасности pipe команд
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-CMD ["node", "src/index.js"] 
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates=20230311 \
+      curl=7.88.1-10+deb12u5 \
+      gnupg=2.2.40-1.1 \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg \
+         | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) \
+         signed-by=/etc/apt/keyrings/docker.gpg] \
+         https://download.docker.com/linux/debian \
+         $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+         > /etc/apt/sources.list.d/docker.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+         docker-ce-cli=5:24.0.7-1~debian.12~bookworm \
+         docker-compose-plugin=2.21.0-1~debian.12~bookworm \
+    && apt-get purge -y curl gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Прод-зависимости только нужные рантайму
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+
+# Артефакты сборки
+COPY --from=builder /app/dist ./dist
+
+# Опционально: директория для конфигов (без VOLUME)  
+RUN mkdir -p /app/config
+
+# Если нужен alias "docker-compose": тонкая обёртка на плагин
+RUN printf '#!/bin/sh\nexec docker compose "$@"\n' > /usr/local/bin/docker-compose \
+    && chmod +x /usr/local/bin/docker-compose
+
+ENV NODE_ENV=production
+CMD ["node", "dist/index.js"]

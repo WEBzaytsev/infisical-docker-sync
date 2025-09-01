@@ -12,16 +12,16 @@ exclude_patterns = [
 name = "javascript"
 enabled = true
 
+  [analyzers.meta]
+  # Указываем Node.js окружение для TypeScript проекта
+  environment = ["nodejs"]
+
 [[analyzers]]
 name = "docker"
 enabled = true
 
 [[analyzers]]
 name = "secrets"
-enabled = true
-
-[[analyzers]]
-name = "yaml"
 enabled = true
 
 

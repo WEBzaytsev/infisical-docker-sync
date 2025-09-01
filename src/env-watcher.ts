@@ -1,0 +1,83 @@
+import fs from 'fs/promises';
+import crypto from 'crypto';
+import path from 'path';
+import { info, error } from './logger.js';
+
+/**
+ * Хеширование строки данных для определения изменений
+ */
+function hash(data: string): string {
+  return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+/**
+ * Проверяет, изменилось ли содержимое файла по сравнению с новым контентом
+ *
+ * @param filePath - Путь к файлу .env
+ * @param newContent - Новое содержимое файла
+ * @returns True если файл изменился или не существует
+ */
+export async function hasChanged(
+  filePath: string,
+  newContent: string
+): Promise<boolean> {
+  try {
+    // Получаем хеш нового содержимого
+    const newHash = hash(newContent);
+
+    try {
+      // Пытаемся прочитать существующий файл
+      const existing = await fs.readFile(filePath, 'utf8');
+      const existingHash = hash(existing);
+
+      // Сравниваем хеши
+      const changed = existingHash !== newHash;
+
+      if (changed) {
+        info(`[CHANGE] Файл ${filePath} изменился:`);
+        info(`  - Старый хеш: ${existingHash.slice(0, 10)}...`);
+        info(`  - Новый хеш: ${newHash.slice(0, 10)}...`);
+
+        // Для дополнительной диагностики можно вывести отличающиеся строки
+        const existingLines = existing.split('\n').sort();
+        const newLines = newContent.split('\n').sort();
+
+        // Найдем добавленные строки
+        const addedLines = newLines.filter(
+          line => !existingLines.includes(line)
+        );
+        if (addedLines.length > 0) {
+          info(`  - Добавлено строк: ${addedLines.length}`);
+        }
+
+        // Найдем удаленные строки
+        const removedLines = existingLines.filter(
+          line => !newLines.includes(line)
+        );
+        if (removedLines.length > 0) {
+          info(`  - Удалено строк: ${removedLines.length}`);
+        }
+      }
+
+      return changed;
+    } catch {
+      // Файл не существует, считаем это изменением
+      info(`Файл ${filePath} не существует, будет создан`);
+      return true;
+    }
+  } catch (err) {
+    error(`Ошибка при проверке изменений: ${(err as Error).message}`);
+    // В случае ошибки считаем, что файл изменился, чтобы обновить его
+    return true;
+  }
+}
+
+/**
+ * Создает директорию для .env файла, если она не существует
+ *
+ * @param filePath - Путь к файлу .env
+ */
+export async function ensureEnvDir(filePath: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true });
+}
