@@ -20,9 +20,9 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN --mount=type=cache,target=/var/cache/apt \
     apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates=20230311 \
-      curl=7.88.1-10+deb12u5 \
-      gnupg=2.2.40-1.1 \
+      ca-certificates \
+      curl \
+      gnupg \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg \
          | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -32,8 +32,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
          $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
          > /etc/apt/sources.list.d/docker.list \
     && apt-get update && apt-get install -y --no-install-recommends \
-         docker-ce-cli=5:24.0.7-1~debian.12~bookworm \
-         docker-compose-plugin=2.21.0-1~debian.12~bookworm \
+         docker-ce-cli \
+         docker-compose-plugin \
     && apt-get purge -y curl gnupg \
     && rm -rf /var/lib/apt/lists/*
 
