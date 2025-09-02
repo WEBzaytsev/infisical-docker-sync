@@ -1,6 +1,5 @@
 version = 1
 
-# Common excludes for Node.js projects
 exclude_patterns = [
   "**/node_modules/**",
   "**/dist/**",
@@ -10,18 +9,12 @@ exclude_patterns = [
 
 [[analyzers]]
 name = "javascript"
-enabled = true
 
   [analyzers.meta]
-  # Указываем Node.js окружение для TypeScript проекта
   environment = ["nodejs"]
 
 [[analyzers]]
-name = "docker"
-enabled = true
+name = "shell"
 
 [[analyzers]]
-name = "secrets"
-enabled = true
-
-
+name = "docker"
