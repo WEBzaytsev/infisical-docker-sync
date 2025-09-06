@@ -59,7 +59,8 @@ RUN echo "PATH: $PATH" \
     && ls -la /usr/local/bin/docker* || true \
     && which docker \
     && docker --version \
-    && docker compose version
+    && docker compose version \
+    && echo "Docker CLI готов к работе!"
 
 ENV NODE_ENV=production
 CMD ["node", "dist/index.js"]
