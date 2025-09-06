@@ -35,7 +35,72 @@ function extractComposeInfo(
   };
 }
 
-// Пересоздание контейнера через Docker API
+// Находит зависимые контейнеры (которые зависят от целевого)
+async function findDependentContainers(project: string, targetService: string): Promise<ContainerInfo[]> {
+  try {
+    info(`[DEPS] Ищем контейнеры, зависящие от ${targetService}...`);
+    
+    // Получаем все контейнеры проекта
+    const projectContainers = await docker.listContainers({
+      all: true,
+      filters: { 
+        label: [`com.docker.compose.project=${project}`]
+      },
+    });
+
+    const dependents: ContainerInfo[] = [];
+
+    for (const containerInfo of projectContainers) {
+      const labels = containerInfo.Labels || {};
+      const serviceName = labels['com.docker.compose.service'];
+      
+      // Пропускаем сам контейнер
+      if (serviceName === targetService) {
+        continue;
+      }
+
+      // Проверяем зависимости в метках (depends_on)
+      const dependsOn = labels['com.docker.compose.depends_on'];
+      if (dependsOn) {
+        let dependencies: string[] = [];
+        
+        try {
+          // Пытаемся парсить как JSON массив
+          dependencies = JSON.parse(dependsOn);
+        } catch {
+          // Если не JSON, то строка разделенная запятыми или пробелами
+          dependencies = dependsOn.split(/[,\s]+/).map(dep => dep.trim()).filter(dep => dep.length > 0);
+        }
+        
+        if (dependencies.includes(targetService)) {
+          dependents.push(containerInfo as ContainerInfo);
+          info(`[DEPS] Найден зависимый контейнер: ${serviceName} зависит от ${targetService}`);
+          continue;
+        }
+      }
+
+      // Проверяем links (устаревший способ, но еще используется)
+      const links = labels['com.docker.compose.links'];
+      if (links && links.includes(targetService)) {
+        dependents.push(containerInfo as ContainerInfo);
+        info(`[DEPS] Найден зависимый контейнер: ${serviceName} связан с ${targetService} (links)`);
+      }
+    }
+
+    if (dependents.length === 0) {
+      info(`[DEPS] Зависимых контейнеров не найдено`);
+    } else {
+      info(`[DEPS] Найдено ${dependents.length} зависимых контейнеров`);
+    }
+
+    return dependents;
+  } catch (err) {
+    warn(`[DEPS] Ошибка поиска зависимостей: ${(err as Error).message}`);
+    return [];
+  }
+}
+
+// Пересоздание контейнера через Docker API с учетом зависимостей
 async function recreateViaDockerAPI(project: string, service: string): Promise<void> {
   try {
     info(`[API] Пересоздание контейнера ${service} через Docker API`);
@@ -58,6 +123,28 @@ async function recreateViaDockerAPI(project: string, service: string): Promise<v
     const container = docker.getContainer(containerInfo.Id);
 
     info(`[API] Найден контейнер ${service} (${containerInfo.Id.slice(0, 12)})`);
+
+    // Шаг 0: Находим и останавливаем зависимые контейнеры
+    const dependentContainers = await findDependentContainers(project, service);
+    const stoppedDependents: { id: string; name: string; wasRunning: boolean }[] = [];
+
+    for (const depContainer of dependentContainers) {
+      const depService = depContainer.Labels?.['com.docker.compose.service'] || depContainer.Names?.[0]?.replace('/', '') || depContainer.Id.slice(0, 12);
+      const wasRunning = depContainer.State === 'running';
+      
+      if (wasRunning) {
+        info(`[DEPS] Останавливаем зависимый контейнер: ${depService}`);
+        const depDockerContainer = docker.getContainer(depContainer.Id);
+        await depDockerContainer.stop({ t: 10 });
+        info(`[DEPS] Контейнер ${depService} остановлен`);
+      }
+      
+      stoppedDependents.push({
+        id: depContainer.Id,
+        name: depService,
+        wasRunning
+      });
+    }
 
     // Шаг 1: Получаем конфигурацию контейнера ПЕРЕД удалением
     info(`[API] Сохраняем конфигурацию контейнера ${service}...`);
@@ -127,6 +214,45 @@ async function recreateViaDockerAPI(project: string, service: string): Promise<v
     await newContainer.start();
     
     info(`[API] Контейнер ${service} успешно пересоздан`);
+
+    // Шаг 5: Запускаем зависимые контейнеры обратно
+    if (stoppedDependents.length > 0) {
+      info(`[DEPS] Восстанавливаем зависимые контейнеры...`);
+      
+      for (const dependent of stoppedDependents) {
+        if (dependent.wasRunning) {
+          try {
+            // Находим контейнер заново (может быть пересоздан)
+            const currentDepContainers = await docker.listContainers({
+              all: true,
+              filters: { 
+                label: [
+                  `com.docker.compose.project=${project}`
+                ],
+                name: [dependent.name]
+              },
+            });
+
+            if (currentDepContainers.length > 0) {
+              const currentDepContainer = docker.getContainer(currentDepContainers[0].Id);
+              await currentDepContainer.start();
+              info(`[DEPS] Запущен зависимый контейнер: ${dependent.name}`);
+            } else {
+              // Пытаемся запустить по старому ID
+              const depContainer = docker.getContainer(dependent.id);
+              await depContainer.start();
+              info(`[DEPS] Запущен зависимый контейнер: ${dependent.name}`);
+            }
+          } catch (depErr) {
+            warn(`[DEPS] Ошибка запуска зависимого контейнера ${dependent.name}: ${(depErr as Error).message}`);
+          }
+        } else {
+          info(`[DEPS] Контейнер ${dependent.name} не был запущен, оставляем остановленным`);
+        }
+      }
+      
+      info(`[DEPS] Восстановление зависимых контейнеров завершено`);
+    }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     error(`[API] Ошибка при работе с контейнером ${service}: ${errorMessage}`);
