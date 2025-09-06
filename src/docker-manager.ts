@@ -9,12 +9,57 @@ import YAML from 'yaml';
 
 const execAsync = promisify(exec);
 
+// Кеш для полного пути к docker
+let dockerPath: string | null = null;
+
 /**
- * Безопасное выполнение команды без shell
+ * Находит полный путь к docker исполняемому файлу
  */
-function execCommand(command: string, args: string[], options: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
+async function findDockerPath(): Promise<string> {
+  if (dockerPath) {
+    return dockerPath;
+  }
+
+  try {
+    // Используем which для поиска docker в PATH
+    const { stdout } = await execAsync('which docker');
+    dockerPath = stdout.trim();
+    info(`[DOCKER] Найден Docker по пути: ${dockerPath}`);
+    return dockerPath;
+  } catch (err) {
+    // Fallback - пробуем стандартные пути
+    const possiblePaths = [
+      '/usr/bin/docker',
+      '/usr/local/bin/docker',
+      '/bin/docker'
+    ];
+
+    for (const path of possiblePaths) {
+      try {
+        const { stdout } = await execAsync(`${path} --version`);
+        if (stdout.includes('Docker version')) {
+          dockerPath = path;
+          info(`[DOCKER] Найден Docker по пути: ${path}`);
+          return path;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    error(`[DOCKER] Не удалось найти Docker: ${(err as Error).message}`);
+    throw new Error('Docker не найден в системе');
+  }
+}
+
+/**
+ * Безопасное выполнение команды Docker
+ */
+async function execCommand(command: string, args: string[], options: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
+  const dockerBin = await findDockerPath();
+  
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(dockerBin, args, {
       cwd: options.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
