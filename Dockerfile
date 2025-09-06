@@ -23,6 +23,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
       ca-certificates \
       curl \
       gnupg \
+      which \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg \
          | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -36,6 +37,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
          docker-compose-plugin \
     && apt-get purge -y curl gnupg \
     && rm -rf /var/lib/apt/lists/*
+# which остается установленным для поиска docker в PATH
 
 # Прод-зависимости только нужные рантайму
 COPY package*.json ./
@@ -50,6 +52,14 @@ RUN mkdir -p /app/data
 # Если нужен alias "docker-compose": тонкая обёртка на плагин
 RUN printf '#!/bin/sh\nexec docker compose "$@"\n' > /usr/local/bin/docker-compose \
     && chmod +x /usr/local/bin/docker-compose
+
+# Проверяем что Docker установлен и доступен
+RUN echo "PATH: $PATH" \
+    && ls -la /usr/bin/docker* || true \
+    && ls -la /usr/local/bin/docker* || true \
+    && which docker \
+    && docker --version \
+    && docker compose version
 
 ENV NODE_ENV=production
 CMD ["node", "dist/index.js"]
