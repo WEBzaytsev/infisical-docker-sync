@@ -151,7 +151,8 @@ export class StateManager {
    */
   async removeService(serviceName: string): Promise<void> {
     if (this.state.services[serviceName]) {
-      delete this.state.services[serviceName];
+      const { [serviceName]: removed, ...remainingServices } = this.state.services;
+      this.state.services = remainingServices;
       await this.saveState();
       info(`[STATE] Сервис ${serviceName} удален из состояния`);
     }

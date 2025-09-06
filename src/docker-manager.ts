@@ -33,7 +33,7 @@ async function checkDockerCompose(): Promise<boolean> {
     info('[COMPOSE] Проверяем наличие Docker Compose v2...');
     const { stdout, stderr } = await execAsync('docker compose version');
     
-    info(`[COMPOSE] Команда выполнена успешно`);
+    info('[COMPOSE] Команда выполнена успешно');
     if (stdout) {
       info(`[DOCKER-HOST] stdout: ${stdout.trim()}`);
     }
@@ -44,11 +44,12 @@ async function checkDockerCompose(): Promise<boolean> {
     return true;
   } catch (err) {
     error(`[COMPOSE] Ошибка проверки Docker Compose: ${(err as Error).message}`);
-    if ((err as any).stdout) {
-      error(`[DOCKER-HOST] stdout: ${(err as any).stdout}`);
+    const execError = err as { stdout?: string; stderr?: string };
+    if (execError.stdout) {
+      error(`[DOCKER-HOST] stdout: ${execError.stdout}`);
     }
-    if ((err as any).stderr) {
-      error(`[DOCKER-HOST] stderr: ${(err as any).stderr}`);
+    if (execError.stderr) {
+      error(`[DOCKER-HOST] stderr: ${execError.stderr}`);
     }
     return false;
   }
@@ -131,7 +132,7 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
     const stopCommand = `${composeCmd} ${configArgs} stop ${service}`;
     info(`[COMPOSE] Останавливаем: ${stopCommand}`);
 
-    info(`[COMPOSE] Выполняем команду остановки на хосте...`);
+    info('[COMPOSE] Выполняем команду остановки на хосте...');
     const { stdout: stopOutput, stderr: stopError } = await execAsync(
       stopCommand,
       {
@@ -139,7 +140,7 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
       }
     );
 
-    info(`[COMPOSE] Команда остановки выполнена`);
+    info('[COMPOSE] Команда остановки выполнена');
     if (stopOutput) {
       info('[DOCKER-HOST] stop stdout:');
       console.log(`[DOCKER-HOST] ${stopOutput.trim()}`);
@@ -153,7 +154,7 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
     const recreateCommand = `${composeCmd} ${configArgs} up -d --force-recreate ${service}`;
     info(`[COMPOSE] Пересоздаем: ${recreateCommand}`);
 
-    info(`[COMPOSE] Выполняем команду пересоздания на хосте...`);
+    info('[COMPOSE] Выполняем команду пересоздания на хосте...');
     const { stdout: recreateOutput, stderr: recreateError } = await execAsync(
       recreateCommand,
       {
@@ -161,7 +162,7 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
       }
     );
 
-    info(`[COMPOSE] Команда пересоздания выполнена`);
+    info('[COMPOSE] Команда пересоздания выполнена');
     if (recreateOutput) {
       info('[DOCKER-HOST] recreate stdout:');
       console.log(`[DOCKER-HOST] ${recreateOutput.trim()}`);
@@ -175,7 +176,7 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
     info('[COMPOSE] Запускаем все связанные сервисы...');
     const startAllCommand = `${composeCmd} ${configArgs} up -d`;
 
-    info(`[COMPOSE] Выполняем команду запуска на хосте...`);
+    info('[COMPOSE] Выполняем команду запуска на хосте...');
     const { stdout: startOutput, stderr: startError } = await execAsync(
       startAllCommand,
       {
@@ -183,7 +184,7 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
       }
     );
 
-    info(`[COMPOSE] Команда запуска выполнена`);
+    info('[COMPOSE] Команда запуска выполнена');
     if (startOutput) {
       info('[DOCKER-HOST] start stdout:');
       console.log(`[DOCKER-HOST] ${startOutput.trim()}`);
@@ -199,14 +200,15 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
     
     // Логируем подробную информацию об ошибке
     error(`[COMPOSE] Ошибка выполнения команды: ${errorMessage}`);
-    if ((err as any).stdout) {
-      error(`[DOCKER-HOST] error stdout: ${(err as any).stdout}`);
+    const execError = err as { stdout?: string; stderr?: string; code?: number };
+    if (execError.stdout) {
+      error(`[DOCKER-HOST] error stdout: ${execError.stdout}`);
     }
-    if ((err as any).stderr) {
-      error(`[DOCKER-HOST] error stderr: ${(err as any).stderr}`);
+    if (execError.stderr) {
+      error(`[DOCKER-HOST] error stderr: ${execError.stderr}`);
     }
-    if ((err as any).code) {
-      error(`[DOCKER-HOST] exit code: ${(err as any).code}`);
+    if (execError.code) {
+      error(`[DOCKER-HOST] exit code: ${execError.code}`);
     }
 
     // Проверяем, не связана ли ошибка с отсутствующими env файлами
