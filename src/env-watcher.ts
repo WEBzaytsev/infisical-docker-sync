@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import crypto from 'crypto';
 import path from 'path';
 import { info, error } from './logger.js';
+import { stateManager } from './state-manager.js';
 
 /**
  * Хеширование строки данных для определения изменений
@@ -12,33 +13,34 @@ function hash(data: string): string {
 
 /**
  * Проверяет, изменилось ли содержимое файла по сравнению с новым контентом
+ * Использует StateManager для персистентного хранения хешей
  *
+ * @param serviceName - Имя сервиса для идентификации в состоянии
  * @param filePath - Путь к файлу .env
  * @param newContent - Новое содержимое файла
  * @returns True если файл изменился или не существует
  */
 export async function hasChanged(
+  serviceName: string,
   filePath: string,
   newContent: string
 ): Promise<boolean> {
   try {
     // Получаем хеш нового содержимого
     const newHash = hash(newContent);
+    const variableCount = newContent.split('\n').filter(line => line.trim() && !line.startsWith('#')).length;
 
-    try {
-      // Пытаемся прочитать существующий файл
-      const existing = await fs.readFile(filePath, 'utf8');
-      const existingHash = hash(existing);
+    // Проверяем через StateManager
+    const changed = stateManager.hasServiceChanged(serviceName, newHash);
 
-      // Сравниваем хеши
-      const changed = existingHash !== newHash;
+    if (changed) {
+      info(`[CHANGE] Файл ${filePath} изменился:`);
+      info(`  - Старый хеш: ${stateManager.getServiceState(serviceName)?.lastHash.slice(0, 10) || 'нет'}...`);
+      info(`  - Новый хеш: ${newHash.slice(0, 10)}...`);
 
-      if (changed) {
-        info(`[CHANGE] Файл ${filePath} изменился:`);
-        info(`  - Старый хеш: ${existingHash.slice(0, 10)}...`);
-        info(`  - Новый хеш: ${newHash.slice(0, 10)}...`);
-
-        // Для дополнительной диагностики можно вывести отличающиеся строки
+      // Сравниваем с файлом на диске для диагностики
+      try {
+        const existing = await fs.readFile(filePath, 'utf8');
         const existingLines = existing.split('\n').sort();
         const newLines = newContent.split('\n').sort();
 
@@ -57,14 +59,15 @@ export async function hasChanged(
         if (removedLines.length > 0) {
           info(`  - Удалено строк: ${removedLines.length}`);
         }
+      } catch {
+        info(`  - Файл ${filePath} не существует, будет создан`);
       }
 
-      return changed;
-    } catch {
-      // Файл не существует, считаем это изменением
-      info(`Файл ${filePath} не существует, будет создан`);
-      return true;
+      // Обновляем состояние сервиса
+      await stateManager.updateServiceState(serviceName, filePath, newHash, variableCount);
     }
+
+    return changed;
   } catch (err) {
     error(`Ошибка при проверке изменений: ${(err as Error).message}`);
     // В случае ошибки считаем, что файл изменился, чтобы обновить его

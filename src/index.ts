@@ -4,6 +4,7 @@ import { hasChanged, ensureEnvDir } from './env-watcher.js';
 import { recreateService } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
 import { setLogLevel, info, debug, error, warn } from './logger.js';
+import { stateManager } from './state-manager.js';
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -47,7 +48,7 @@ async function syncService(
     const envPath = path.join(service.envDir, service.envFileName);
 
     await ensureEnvDir(envPath);
-    const changed = await hasChanged(envPath, envText);
+    const changed = await hasChanged(service.container, envPath, envText);
 
     if (changed) {
       info(
@@ -103,7 +104,7 @@ function setupServiceSync(service: ServiceConfig, globalConfig: Config): void {
 }
 
 // Путь к конфигурационному файлу
-const configPath = process.env.CONFIG_PATH || path.resolve('./config.yaml');
+const configPath = process.env.CONFIG_PATH || '/app/data/config.yaml';
 
 async function recreateConfig(): Promise<void> {
   try {
@@ -144,6 +145,9 @@ async function main(): Promise<void> {
   console.log('[START] Запуск Infisical Docker Sync');
 
   try {
+    // Загружаем сохраненное состояние агента
+    await stateManager.loadState();
+
     // Загрузка первоначальной конфигурации
     const config = await loadConfig(configPath);
 

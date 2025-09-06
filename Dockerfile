@@ -44,8 +44,8 @@ RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 # Артефакты сборки
 COPY --from=builder /app/dist ./dist
 
-# Опционально: директория для конфигов (без VOLUME)  
-RUN mkdir -p /app/config
+# Директория для данных агента (конфиг + состояние)
+RUN mkdir -p /app/data
 
 # Если нужен alias "docker-compose": тонкая обёртка на плагин
 RUN printf '#!/bin/sh\nexec docker compose "$@"\n' > /usr/local/bin/docker-compose \

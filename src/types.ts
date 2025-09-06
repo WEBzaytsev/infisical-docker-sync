@@ -49,3 +49,19 @@ export const LOG_LEVELS = {
   INFO: 'info' as const,
   NONE: 'silent' as const,
 } as const;
+
+// Состояние агента для персистентности между перезагрузками
+export interface AgentState {
+  version: string;
+  lastUpdate: string;
+  services: {
+    [serviceName: string]: ServiceState;
+  };
+}
+
+export interface ServiceState {
+  envFilePath: string;
+  lastHash: string;
+  lastSync: string;
+  variableCount: number;
+}
