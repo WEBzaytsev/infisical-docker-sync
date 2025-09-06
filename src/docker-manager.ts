@@ -198,7 +198,106 @@ async function analyzeComposeFile(
   }
 }
 
-// Безопасное пересоздание контейнера через Docker Compose v2
+// Простое пересоздание контейнера через Docker API (fallback)
+async function recreateViaDockerAPI(project: string, service: string): Promise<void> {
+  try {
+    info(`[API] Пересоздание контейнера ${service} через Docker API`);
+
+    // Находим контейнер по имени и проекту
+    const containers = await docker.listContainers({
+      all: true,
+      filters: { 
+        name: [service],
+        label: [`com.docker.compose.project=${project}`]
+      },
+    });
+
+    if (containers.length === 0) {
+      error(`[API] Контейнер ${service} не найден в проекте ${project}`);
+      return;
+    }
+
+    const containerInfo = containers[0];
+    const container = docker.getContainer(containerInfo.Id);
+
+    info(`[API] Найден контейнер ${service} (${containerInfo.Id.slice(0, 12)})`);
+
+    // Шаг 1: Получаем конфигурацию контейнера ПЕРЕД удалением
+    info(`[API] Сохраняем конфигурацию контейнера ${service}...`);
+    const containerData = await container.inspect();
+
+    // Шаг 2: Останавливаем контейнер
+    if (containerInfo.State === 'running') {
+      info(`[API] Останавливаем контейнер ${service}...`);
+      await container.stop({ t: 10 }); // 10 секунд на graceful shutdown
+      info(`[API] Контейнер ${service} остановлен`);
+    } else {
+      info(`[API] Контейнер ${service} уже остановлен`);
+    }
+
+    // Шаг 3: Удаляем контейнер
+    info(`[API] Удаляем контейнер ${service}...`);
+    await container.remove({ force: true });
+    info(`[API] Контейнер ${service} удален`);
+
+    // Шаг 4: Пересоздаем контейнер с новой конфигурацией
+    info(`[API] Пересоздаем контейнер ${service} с обновленными переменными...`);
+    
+    // Создаем новый контейнер с основными параметрами
+    const createOptions = {
+      Image: containerData.Config.Image,
+      name: containerData.Name.replace('/', ''), // убираем leading slash
+      Env: containerData.Config.Env,
+      Labels: containerData.Config.Labels,
+      WorkingDir: containerData.Config.WorkingDir,
+      Cmd: containerData.Config.Cmd,
+      Entrypoint: containerData.Config.Entrypoint,
+      ExposedPorts: containerData.Config.ExposedPorts,
+      HostConfig: {
+        NetworkMode: containerData.HostConfig.NetworkMode,
+        PortBindings: containerData.HostConfig.PortBindings,
+        Binds: containerData.HostConfig.Binds,
+        RestartPolicy: containerData.HostConfig.RestartPolicy,
+        // Основные параметры хоста
+        Memory: containerData.HostConfig.Memory,
+        CpuShares: containerData.HostConfig.CpuShares,
+      },
+    };
+
+    info(`[API] Создаем новый контейнер с именем: ${createOptions.name}`);
+    const newContainer = await docker.createContainer(createOptions);
+    
+    // Подключаем к тем же сетям
+    if (containerData.NetworkSettings?.Networks) {
+      for (const [networkName, networkConfig] of Object.entries(containerData.NetworkSettings.Networks)) {
+        if (networkName !== 'bridge') { // Пропускаем default bridge
+          try {
+            const network = docker.getNetwork(networkName);
+            await network.connect({
+              Container: newContainer.id,
+              EndpointConfig: {
+                Aliases: networkConfig.Aliases,
+              }
+            });
+            info(`[API] Подключен к сети: ${networkName}`);
+          } catch (netErr) {
+            warn(`[API] Не удалось подключить к сети ${networkName}: ${(netErr as Error).message}`);
+          }
+        }
+      }
+    }
+
+    await newContainer.start();
+    
+    info(`[API] Контейнер ${service} успешно пересоздан`);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    error(`[API] Ошибка при работе с контейнером ${service}: ${errorMessage}`);
+    throw new Error(`Ошибка Docker API: ${errorMessage}`);
+  }
+}
+
+// Безопасное пересоздание контейнера через Docker API
 async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
   const { project, service, workingDir, configFiles } = composeInfo;
 
@@ -220,22 +319,34 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
     info(`[COMPOSE] Останавливаем: docker ${stopArgs.join(' ')}`);
 
     info('[COMPOSE] Выполняем команду остановки на хосте...');
-    const { stdout: stopOutput, stderr: stopError } = await execCommand(
-      'docker',
-      stopArgs,
-      { cwd: workingDir }
+    
+    // Временный fallback: если spawn не работает, используем Docker API
+    try {
+      const { stdout: stopOutput, stderr: stopError } = await execCommand(
+        'docker',
+        stopArgs,
+        { cwd: workingDir }
+      );
       
-    );
+      info('[COMPOSE] Команда остановки выполнена через CLI');
+      if (stopOutput) {
+        info('[DOCKER-HOST] stop stdout:');
+        console.log(`[DOCKER-HOST] ${stopOutput.trim()}`);
+      }
+      if (stopError) {
+        warn('[DOCKER-HOST] stop stderr:');
+        console.log(`[DOCKER-HOST] ${stopError.trim()}`);
+      }
+    } catch (cliError) {
+      warn(`[COMPOSE] CLI команда не работает: ${(cliError as Error).message}`);
+      warn(`[COMPOSE] Переходим на Docker API...`);
+      
+      // Fallback: используем Docker API для простого restart
+      await recreateViaDockerAPI(project, service);
+      return; // Выходим из функции, API restart уже выполнен
+    }
 
-    info('[COMPOSE] Команда остановки выполнена');
-    if (stopOutput) {
-      info('[DOCKER-HOST] stop stdout:');
-      console.log(`[DOCKER-HOST] ${stopOutput.trim()}`);
-    }
-    if (stopError) {
-      warn('[DOCKER-HOST] stop stderr:');
-      console.log(`[DOCKER-HOST] ${stopError.trim()}`);
-    }
+    // Переменные stopOutput и stopError уже обработаны выше в try блоке
 
     // Шаг 2: Пересоздаем контейнер с обновленными переменными
     const recreateArgs = ['compose', ...configArgs, 'up', '-d', '--force-recreate', service];
