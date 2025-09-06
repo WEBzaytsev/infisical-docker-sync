@@ -1,6 +1,6 @@
 import Docker from 'dockerode';
 import { info, error, warn } from './logger.js';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { ServiceConfig } from './types.js';
 import fs from 'fs/promises';
@@ -8,6 +8,45 @@ import path from 'path';
 import YAML from 'yaml';
 
 const execAsync = promisify(exec);
+
+/**
+ * Безопасное выполнение команды без shell
+ */
+function execCommand(command: string, args: string[], options: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(`Command failed with exit code ${code}`);
+        (error as any).code = code;
+        (error as any).stdout = stdout;
+        (error as any).stderr = stderr;
+        reject(error);
+      }
+    });
+
+    child.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -31,7 +70,7 @@ interface ComposeInfo {
 async function checkDockerCompose(): Promise<boolean> {
   try {
     info('[COMPOSE] Проверяем наличие Docker Compose v2...');
-    const { stdout, stderr } = await execAsync('docker compose version');
+    const { stdout, stderr } = await execCommand('docker', ['compose', 'version']);
     
     info('[COMPOSE] Команда выполнена успешно');
     if (stdout) {
@@ -124,20 +163,23 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
   // Используем только Docker Compose v2
   const composeCmd = 'docker compose';
 
-  // Добавляем файлы конфигурации
-  const configArgs = configFiles.map(file => `-f ${file}`).join(' ');
+  // Добавляем файлы конфигурации как массив аргументов
+  const configArgs: string[] = [];
+  for (const file of configFiles) {
+    configArgs.push('-f', file);
+  }
 
   try {
     // Шаг 1: Останавливаем сервис gracefully (это также остановит зависимые сервисы)
-    const stopCommand = `${composeCmd} ${configArgs} stop ${service}`;
-    info(`[COMPOSE] Останавливаем: ${stopCommand}`);
+    const stopArgs = ['compose', ...configArgs, 'stop', service];
+    info(`[COMPOSE] Останавливаем: docker ${stopArgs.join(' ')}`);
 
     info('[COMPOSE] Выполняем команду остановки на хосте...');
-    const { stdout: stopOutput, stderr: stopError } = await execAsync(
-      stopCommand,
-      {
-        cwd: workingDir,
-      }
+    const { stdout: stopOutput, stderr: stopError } = await execCommand(
+      'docker',
+      stopArgs,
+      { cwd: workingDir }
+      
     );
 
     info('[COMPOSE] Команда остановки выполнена');
@@ -151,15 +193,14 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
     }
 
     // Шаг 2: Пересоздаем контейнер с обновленными переменными
-    const recreateCommand = `${composeCmd} ${configArgs} up -d --force-recreate ${service}`;
-    info(`[COMPOSE] Пересоздаем: ${recreateCommand}`);
+    const recreateArgs = ['compose', ...configArgs, 'up', '-d', '--force-recreate', service];
+    info(`[COMPOSE] Пересоздаем: docker ${recreateArgs.join(' ')}`);
 
     info('[COMPOSE] Выполняем команду пересоздания на хосте...');
-    const { stdout: recreateOutput, stderr: recreateError } = await execAsync(
-      recreateCommand,
-      {
-        cwd: workingDir,
-      }
+    const { stdout: recreateOutput, stderr: recreateError } = await execCommand(
+      'docker',
+      recreateArgs,
+      { cwd: workingDir }
     );
 
     info('[COMPOSE] Команда пересоздания выполнена');
@@ -174,14 +215,13 @@ async function recreateViaCompose(composeInfo: ComposeInfo): Promise<void> {
 
     // Шаг 3: Запускаем зависимые сервисы, если они были остановлены
     info('[COMPOSE] Запускаем все связанные сервисы...');
-    const startAllCommand = `${composeCmd} ${configArgs} up -d`;
+    const startArgs = ['compose', ...configArgs, 'up', '-d'];
 
     info('[COMPOSE] Выполняем команду запуска на хосте...');
-    const { stdout: startOutput, stderr: startError } = await execAsync(
-      startAllCommand,
-      {
-        cwd: workingDir,
-      }
+    const { stdout: startOutput, stderr: startError } = await execCommand(
+      'docker',
+      startArgs,
+      { cwd: workingDir }
     );
 
     info('[COMPOSE] Команда запуска выполнена');
