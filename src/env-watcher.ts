@@ -32,6 +32,11 @@ export async function hasChanged(
 
     // Проверяем через StateManager
     const changed = stateManager.hasServiceChanged(serviceName, newHash);
+    
+    info(`[CHECK] Проверка изменений для ${serviceName}:`);
+    info(`  - Новый хеш: ${newHash.slice(0, 10)}...`);
+    info(`  - Переменных: ${variableCount}`);
+    info(`  - Изменился: ${changed ? 'ДА' : 'НЕТ'}`);
 
     if (changed) {
       info(`[CHANGE] Файл ${filePath} изменился:`);
@@ -63,8 +68,6 @@ export async function hasChanged(
         info(`  - Файл ${filePath} не существует, будет создан`);
       }
 
-      // Обновляем состояние сервиса
-      await stateManager.updateServiceState(serviceName, filePath, newHash, variableCount);
     }
 
     return changed;
@@ -72,6 +75,32 @@ export async function hasChanged(
     error(`Ошибка при проверке изменений: ${(err as Error).message}`);
     // В случае ошибки считаем, что файл изменился, чтобы обновить его
     return true;
+  }
+}
+
+/**
+ * Обновляет состояние сервиса после записи файла
+ *
+ * @param serviceName - Имя сервиса
+ * @param filePath - Путь к файлу .env
+ * @param content - Содержимое файла
+ */
+export async function updateServiceState(
+  serviceName: string,
+  filePath: string,
+  content: string
+): Promise<void> {
+  try {
+    const newHash = hash(content);
+    const variableCount = content.split('\n').filter(line => line.trim() && !line.startsWith('#')).length;
+    
+    await stateManager.updateServiceState(serviceName, filePath, newHash, variableCount);
+    info(`[STATE] Обновлено состояние сервиса ${serviceName}:`);
+    info(`  - Хеш: ${newHash.slice(0, 10)}...`);
+    info(`  - Переменных: ${variableCount}`);
+    info(`  - Файл: ${filePath}`);
+  } catch (err) {
+    error(`Ошибка обновления состояния ${serviceName}: ${(err as Error).message}`);
   }
 }
 

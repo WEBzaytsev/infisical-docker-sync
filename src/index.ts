@@ -1,6 +1,6 @@
 import { loadConfig } from './config-loader.js';
 import { fetchEnv } from './infisical-client.js';
-import { hasChanged, ensureEnvDir } from './env-watcher.js';
+import { hasChanged, ensureEnvDir, updateServiceState } from './env-watcher.js';
 import { recreateService } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
 import { setLogLevel, info, debug, error, warn } from './logger.js';
@@ -54,7 +54,12 @@ async function syncService(
       info(
         `[UPDATE] Обновление ${Object.keys(envVars).length} переменных для ${service.container}`
       );
+      
+      // Записываем файл
       await fs.writeFile(envPath, envText);
+      
+      // Обновляем состояние ПОСЛЕ записи файла
+      await updateServiceState(service.container, envPath, envText);
 
       // Пересоздаём контейнер
       info('[RECREATE] Пересоздаём контейнер');
