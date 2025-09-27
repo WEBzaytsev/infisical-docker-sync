@@ -82,14 +82,14 @@ async function findDependentContainers(project: string, targetService: string): 
 
       // Проверяем links (устаревший способ, но еще используется)
       const links = labels['com.docker.compose.links'];
-      if (links && links.includes(targetService)) {
+      if (links?.includes(targetService)) {
         dependents.push(containerInfo as ContainerInfo);
         info(`[DEPS] Найден зависимый контейнер: ${serviceName} связан с ${targetService} (links)`);
       }
     }
 
     if (dependents.length === 0) {
-      info(`[DEPS] Зависимых контейнеров не найдено`);
+      info('[DEPS] Зависимых контейнеров не найдено');
     } else {
       info(`[DEPS] Найдено ${dependents.length} зависимых контейнеров`);
     }
@@ -218,7 +218,7 @@ async function recreateViaDockerAPI(project: string, service: string): Promise<v
 
     // Шаг 5: Запускаем зависимые контейнеры обратно
     if (stoppedDependents.length > 0) {
-      info(`[DEPS] Восстанавливаем зависимые контейнеры...`);
+      info('[DEPS] Восстанавливаем зависимые контейнеры...');
       
       for (const dependent of stoppedDependents) {
         if (dependent.wasRunning) {
@@ -252,7 +252,7 @@ async function recreateViaDockerAPI(project: string, service: string): Promise<v
         }
       }
       
-      info(`[DEPS] Восстановление зависимых контейнеров завершено`);
+      info('[DEPS] Восстановление зависимых контейнеров завершено');
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
