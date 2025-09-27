@@ -9,6 +9,7 @@ interface ContainerInfo {
   Image: string;
   Labels: Record<string, string>;
   State: string;
+  Names?: string[];
 }
 
 // Используем встроенный тип из dockerode
