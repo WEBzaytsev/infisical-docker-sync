@@ -137,7 +137,7 @@ async function recreateConfig(): Promise<void> {
       setupServiceSync(service, config);
     }
 
-    info('[OK] Конфигурация успешно перезагружена');
+    info('[RELOAD] Перезагрузка завершена, синхронизация запущена в фоне');
   } catch (err) {
     error(`Ошибка при перезагрузке конфигурации: ${(err as Error).message}`);
     error(
