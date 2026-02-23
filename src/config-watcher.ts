@@ -1,5 +1,5 @@
-import chokidar from 'chokidar';
-import { info, error, debug } from './logger.js';
+import chokidar, { FSWatcher } from 'chokidar';
+import { info, error } from './logger.js';
 
 /**
  * Настраивает отслеживание изменений конфигурационного файла
@@ -11,7 +11,7 @@ import { info, error, debug } from './logger.js';
 export function watchConfig(
   configPath: string,
   onConfigChange: () => void
-): chokidar.FSWatcher {
+): FSWatcher {
   info(`Настройка наблюдения за файлом конфигурации: ${configPath}`);
 
   // Создаем наблюдателя, который будет отслеживать только указанный файл
@@ -46,8 +46,8 @@ export function watchConfig(
   });
 
   // Обработка ошибок
-  watcher.on('error', (err: Error) => {
-    error(`Ошибка при наблюдении за файлом: ${err.message}`);
+  watcher.on('error', (err: unknown) => {
+    error(`Ошибка при наблюдении за файлом: ${err instanceof Error ? err.message : String(err)}`);
   });
 
   // Обработка события готовности (когда начато наблюдение)
@@ -55,25 +55,5 @@ export function watchConfig(
     info('[OK] Наблюдение за конфигурационным файлом готово');
   });
 
-  // Возвращаем наблюдателя, чтобы можно было закрыть его при необходимости
   return watcher;
-}
-
-/**
- * Останавливает отслеживание изменений конфигурационного файла
- *
- * @param watcher - Наблюдатель для закрытия
- */
-export function stopWatchingConfig(watcher: chokidar.FSWatcher): void {
-  if (watcher) {
-    debug('[STOP] Остановка наблюдения за конфигурационным файлом');
-    watcher
-      .close()
-      .then(() => {
-        debug('[OK] Наблюдение за конфигурационным файлом остановлено');
-      })
-      .catch((err: Error) => {
-        error(`Ошибка при остановке наблюдения: ${err.message}`);
-      });
-  }
 }

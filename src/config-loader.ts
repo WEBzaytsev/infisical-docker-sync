@@ -2,6 +2,7 @@ import Joi from 'joi';
 import fs from 'fs/promises';
 import path from 'path';
 import YAML from 'yaml';
+import { info, error } from './logger.js';
 import { LOG_LEVELS, Config } from './types.js';
 
 const schema = Joi.object({
@@ -48,7 +49,7 @@ export async function loadConfig(configPath?: string): Promise<Config> {
     const absolutePath = path.isAbsolute(filePath)
       ? filePath
       : path.resolve(process.cwd(), filePath);
-    console.log(`Загрузка конфигурации из: ${absolutePath}`);
+    info(`Загрузка конфигурации из: ${absolutePath}`);
 
     const raw = await fs.readFile(absolutePath, 'utf8');
     const parsed = YAML.parse(raw);
@@ -70,17 +71,14 @@ export async function loadConfig(configPath?: string): Promise<Config> {
       throw new Error(`Ошибка валидации конфигурации: ${error.message}`);
     }
 
-    // Логируем пути к env файлам
     for (const service of value.services) {
       const envPath = path.join(service.envDir, service.envFileName);
-      console.log(`[ENV] Env файл для ${service.container}: ${envPath}`);
+      info(`[ENV] Env файл для ${service.container}: ${envPath}`);
     }
 
     return value as Config;
-  } catch (error) {
-    console.error(
-      `[ERROR] Ошибка загрузки конфига из ${filePath}: ${(error as Error).message}`
-    );
-    throw error;
+  } catch (err) {
+    error(`Ошибка загрузки конфига из ${filePath}: ${(err as Error).message}`);
+    throw err;
   }
 }

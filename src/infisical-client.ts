@@ -2,6 +2,41 @@ import { InfisicalSDK } from '@infisical/sdk';
 import { error, debug } from './logger.js';
 import { InfisicalCredentials, EnvVars, SecretResponse } from './types.js';
 
+const sdkCache = new Map<string, InfisicalSDK>();
+const authCache = new Map<string, Promise<unknown>>();
+
+function getCacheKey(creds: { siteUrl: string; clientId: string; clientSecret: string }): string {
+  return `${creds.siteUrl}|${creds.clientId}|${creds.clientSecret}`;
+}
+
+async function getAuthenticatedSdk(creds: {
+  siteUrl: string;
+  clientId: string;
+  clientSecret: string;
+}): Promise<InfisicalSDK> {
+  const key = getCacheKey(creds);
+  let sdk = sdkCache.get(key);
+
+  if (!sdk) {
+    sdk = new InfisicalSDK({ siteUrl: creds.siteUrl });
+    sdkCache.set(key, sdk);
+  }
+
+  if (!authCache.has(key)) {
+    const authPromise = sdk
+      .auth()
+      .universalAuth.login({ clientId: creds.clientId, clientSecret: creds.clientSecret })
+      .catch(err => {
+        authCache.delete(key);
+        throw err;
+      });
+    authCache.set(key, authPromise);
+  }
+  await authCache.get(key)!;
+
+  return sdk;
+}
+
 export async function fetchEnv({
   siteUrl,
   clientId,
@@ -10,18 +45,8 @@ export async function fetchEnv({
   environment,
 }: InfisicalCredentials): Promise<EnvVars> {
   try {
-    // Создаем экземпляр клиента Infisical
-    const infisicalSdk = new InfisicalSDK({
-      siteUrl, // Если не указано, по умолчанию https://app.infisical.com
-    });
+    const infisicalSdk = await getAuthenticatedSdk({ siteUrl, clientId, clientSecret });
 
-    // Аутентификация с помощью clientId и clientSecret
-    await infisicalSdk.auth().universalAuth.login({
-      clientId,
-      clientSecret,
-    });
-
-    // Получение всех секретов для указанного проекта и окружения
     const response = (await infisicalSdk.secrets().listSecrets({
       environment,
       projectId,

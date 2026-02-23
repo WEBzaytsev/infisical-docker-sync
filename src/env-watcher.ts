@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import path from 'path';
-import { info, error } from './logger.js';
+import { info, error, debug } from './logger.js';
 import { stateManager } from './state-manager.js';
 
 /**
@@ -18,25 +18,26 @@ function hash(data: string): string {
  * @param serviceName - Имя сервиса для идентификации в состоянии
  * @param filePath - Путь к файлу .env
  * @param newContent - Новое содержимое файла
- * @returns True если файл изменился, не существует или рассинхронизирован с диском
+ * @param variableCount - Количество переменных (если не передано — вычисляется из content)
  */
 export async function hasChanged(
   serviceName: string,
   filePath: string,
-  newContent: string
+  newContent: string,
+  variableCount?: number
 ): Promise<boolean> {
   try {
     const newHash = hash(newContent);
-    const variableCount = newContent.split('\n').filter(line => line.trim() && !line.startsWith('#')).length;
+    const count =
+      variableCount ??
+      newContent.split('\n').filter(line => line.trim() && !line.startsWith('#')).length;
 
-    // Проверка 1: Изменился ли хеш в Infisical относительно state
     const stateChanged = stateManager.hasServiceChanged(serviceName, newHash);
-    
-    // Проверка 2: Соответствует ли файл на диске ожидаемому содержимому
+
     let fileNeedsUpdate = false;
     let fileExists = true;
     let diskHash = '';
-    
+
     try {
       const diskContent = await fs.readFile(filePath, 'utf8');
       diskHash = hash(diskContent);
@@ -47,26 +48,14 @@ export async function hasChanged(
     }
 
     const changed = stateChanged || fileNeedsUpdate;
-    
-    info(`[CHECK] Проверка изменений для ${serviceName}:`);
-    info(`  - Новый хеш: ${newHash.slice(0, 10)}...`);
-    info(`  - Переменных: ${variableCount}`);
-    info(`  - Изменился в Infisical: ${stateChanged ? 'ДА' : 'НЕТ'}`);
-    info(`  - Файл на диске: ${fileExists ? (fileNeedsUpdate ? 'РАССИНХРОНИЗИРОВАН' : 'ОК') : 'НЕ СУЩЕСТВУЕТ'}`);
-    if (fileExists && fileNeedsUpdate) {
-      info(`  - Хеш на диске: ${diskHash.slice(0, 10)}...`);
-    }
-    info(`  - Требуется обновление: ${changed ? 'ДА' : 'НЕТ'}`);
+
+    debug(`[CHECK] ${serviceName}: хеш ${newHash.slice(0, 10)}..., диск ${fileExists ? (fileNeedsUpdate ? diskHash.slice(0, 10) : 'OK') : 'нет'}`);
+    info(
+      `[CHECK] ${serviceName}: ${changed ? 'требуется обновление' : 'без изменений'} (${count} переменных)`
+    );
 
     if (changed) {
-      info(`[CHANGE] Файл ${filePath} будет обновлён:`);
-      if (stateChanged) {
-        info(`  - Причина: изменения в Infisical`);
-        info(`  - Старый хеш state: ${stateManager.getServiceState(serviceName)?.lastHash.slice(0, 10) || 'нет'}...`);
-      }
-      if (fileNeedsUpdate) {
-        info(`  - Причина: файл на диске ${fileExists ? 'рассинхронизирован' : 'отсутствует'}`);
-      }
+      debug(`[CHANGE] ${filePath}: stateChanged=${stateChanged}, fileNeedsUpdate=${fileNeedsUpdate}`);
     }
 
     return changed;
@@ -82,21 +71,19 @@ export async function hasChanged(
  * @param serviceName - Имя сервиса
  * @param filePath - Путь к файлу .env
  * @param content - Содержимое файла
+ * @param variableCount - Количество переменных
  */
 export async function updateServiceState(
   serviceName: string,
   filePath: string,
-  content: string
+  content: string,
+  variableCount: number
 ): Promise<void> {
   try {
     const newHash = hash(content);
-    const variableCount = content.split('\n').filter(line => line.trim() && !line.startsWith('#')).length;
-    
     await stateManager.updateServiceState(serviceName, filePath, newHash, variableCount);
-    info(`[STATE] Обновлено состояние сервиса ${serviceName}:`);
-    info(`  - Хеш: ${newHash.slice(0, 10)}...`);
-    info(`  - Переменных: ${variableCount}`);
-    info(`  - Файл: ${filePath}`);
+    debug(`[STATE] ${serviceName}: хеш ${newHash.slice(0, 10)}..., файл ${filePath}`);
+    info(`[STATE] Обновлено состояние ${serviceName} (${variableCount} переменных)`);
   } catch (err) {
     error(`Ошибка обновления состояния ${serviceName}: ${(err as Error).message}`);
   }

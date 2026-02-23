@@ -1,5 +1,6 @@
 import { loadConfig } from './config-loader.js';
 import { fetchEnv } from './infisical-client.js';
+import { envToDotenvFormat } from './env-format.js';
 import { hasChanged, ensureEnvDir, updateServiceState } from './env-watcher.js';
 import { recreateService } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
@@ -40,33 +41,28 @@ async function syncService(
       return;
     }
 
-    const envText = Object.entries(envVars)
-      .map(([k, v]) => `${k}=${v}`)
-      .sort() // Сортировка для стабильного порядка
-      .join('\n');
+    const variableCount = Object.keys(envVars).length;
+    const envText = envToDotenvFormat(envVars);
 
     const envPath = path.join(service.envDir, service.envFileName);
 
     await ensureEnvDir(envPath);
-    const changed = await hasChanged(service.container, envPath, envText);
+    const changed = await hasChanged(service.container, envPath, envText, variableCount);
 
     if (changed) {
       info(
-        `[UPDATE] Обновление ${Object.keys(envVars).length} переменных для ${service.container}`
+        `[UPDATE] Обновление ${variableCount} переменных для ${service.container}`
       );
-      
-      // Записываем файл
+
       await fs.writeFile(envPath, envText);
-      
-      // Обновляем состояние ПОСЛЕ записи файла
-      await updateServiceState(service.container, envPath, envText);
+      await updateServiceState(service.container, envPath, envText, variableCount);
 
       // Пересоздаём контейнер
       info('[RECREATE] Пересоздаём контейнер');
       await recreateService(service);
     } else {
       info(
-        `[OK] Переменные для ${service.container} не изменились (${Object.keys(envVars).length} переменных)`
+        `[OK] Переменные для ${service.container} не изменились (${variableCount} переменных)`
       );
     }
   } catch (err) {
@@ -141,13 +137,13 @@ async function recreateConfig(): Promise<void> {
   } catch (err) {
     error(`Ошибка при перезагрузке конфигурации: ${(err as Error).message}`);
     error(
-      'Продолжаю работу со старой конфигурацией. Исправьте ошибки и сохраните файл снова.'
+      'При ошибке перезагрузки синхронизация может быть прервана. Исправьте конфигурацию и сохраните файл снова.'
     );
   }
 }
 
 async function main(): Promise<void> {
-  console.log('[START] Запуск Infisical Docker Sync');
+  info('[START] Запуск Infisical Docker Sync');
 
   try {
     // Загружаем сохраненное состояние агента
@@ -186,23 +182,16 @@ async function main(): Promise<void> {
   }
 }
 
-// Обработка сигналов завершения
-process.on('SIGINT', () => {
+function handleShutdown(): void {
   info('Получен сигнал завершения, останавливаю таймеры...');
   for (const timer of timers.values()) {
     clearInterval(timer);
   }
   // eslint-disable-next-line no-process-exit
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', () => {
-  info('Получен сигнал завершения, останавливаю таймеры...');
-  for (const timer of timers.values()) {
-    clearInterval(timer);
-  }
-  // eslint-disable-next-line no-process-exit
-  process.exit(0);
-});
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);
 
 void main();
