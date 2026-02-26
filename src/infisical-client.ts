@@ -45,9 +45,9 @@ export async function fetchEnv({
   environment,
 }: InfisicalCredentials): Promise<EnvVars> {
   try {
-    const infisicalSdk = await getAuthenticatedSdk({ siteUrl, clientId, clientSecret });
+    const sdk = await getAuthenticatedSdk({ siteUrl, clientId, clientSecret });
 
-    const response = (await infisicalSdk.secrets().listSecrets({
+    const response = (await sdk.secrets().listSecrets({
       environment,
       projectId,
       expandSecretReferences: true,
@@ -56,27 +56,17 @@ export async function fetchEnv({
       recursive: true,
     })) as SecretResponse;
 
-    // Подробная отладка структуры ответа
-    debug(`Response type: ${typeof response}`);
-    if (typeof response === 'object') {
-      debug(`Response keys: ${Object.keys(response).join(', ')}`);
-      if (response?.secrets?.length > 0) {
-        debug(`Secret count: ${response.secrets.length}`);
-      }
-    }
-
-    // Обработка ответа и преобразование в объект ключ-значение
     const output: EnvVars = {};
 
     if (Array.isArray(response?.secrets)) {
-      response.secrets.forEach(secret => {
+      for (const secret of response.secrets) {
         if (secret?.secretKey && secret.secretValue !== undefined) {
           output[secret.secretKey] = secret.secretValue;
         }
-      });
+      }
     }
 
-    debug(`Final output keys: ${Object.keys(output).join(', ')}`);
+    debug(`Получено ${Object.keys(output).length} секретов для ${environment}`);
     return output;
   } catch (err) {
     error(`Ошибка при получении секретов: ${(err as Error).message}`);

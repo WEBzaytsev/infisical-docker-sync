@@ -1,6 +1,5 @@
 import Docker from 'dockerode';
-import { info, error, warn } from './logger.js';
-import { ServiceConfig } from './types.js';
+import { info, error, warn, debug } from './logger.js';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -12,41 +11,23 @@ interface ContainerInfo {
   Names?: string[];
 }
 
-// Используем встроенный тип из dockerode
-
 interface ComposeInfo {
   project: string;
   service: string;
 }
 
-// Извлекаем информацию о Docker Compose из меток контейнера
-function extractComposeInfo(
-  labels: Record<string, string>
-): ComposeInfo | null {
+function extractComposeInfo(labels: Record<string, string>): ComposeInfo | null {
   const project = labels['com.docker.compose.project'];
   const service = labels['com.docker.compose.service'];
-
-  if (!project || !service) {
-    return null;
-  }
-
-  return {
-    project,
-    service,
-  };
+  if (!project || !service) return null;
+  return { project, service };
 }
 
-// Находит зависимые контейнеры (которые зависят от целевого)
 async function findDependentContainers(project: string, targetService: string): Promise<ContainerInfo[]> {
   try {
-    info(`[DEPS] Ищем контейнеры, зависящие от ${targetService}...`);
-    
-    // Получаем все контейнеры проекта
     const projectContainers = await docker.listContainers({
       all: true,
-      filters: { 
-        label: [`com.docker.compose.project=${project}`]
-      },
+      filters: { label: [`com.docker.compose.project=${project}`] },
     });
 
     const dependents: ContainerInfo[] = [];
@@ -54,73 +35,57 @@ async function findDependentContainers(project: string, targetService: string): 
     for (const containerInfo of projectContainers) {
       const labels = containerInfo.Labels || {};
       const serviceName = labels['com.docker.compose.service'];
-      
-      // Пропускаем сам контейнер
-      if (serviceName === targetService) {
-        continue;
-      }
+      if (serviceName === targetService) continue;
 
-      // Проверяем зависимости в метках (depends_on)
       const dependsOn = labels['com.docker.compose.depends_on'];
       if (dependsOn) {
         let dependencies: string[] = [];
-        
         try {
-          // Пытаемся парсить как JSON массив
           dependencies = JSON.parse(dependsOn);
         } catch {
-          // Если не JSON, то строка разделенная запятыми или пробелами
           dependencies = dependsOn.split(/[,\s]+/).map(dep => dep.trim()).filter(dep => dep.length > 0);
         }
-        
         if (dependencies.includes(targetService)) {
           dependents.push(containerInfo as ContainerInfo);
-          info(`[DEPS] Найден зависимый контейнер: ${serviceName} зависит от ${targetService}`);
+          debug(`[docker] зависимый: ${serviceName} -> ${targetService}`);
           continue;
         }
       }
 
-      // Проверяем links (устаревший способ, но еще используется)
       const links = labels['com.docker.compose.links'];
       if (links?.includes(targetService)) {
         dependents.push(containerInfo as ContainerInfo);
-        info(`[DEPS] Найден зависимый контейнер: ${serviceName} связан с ${targetService} (links)`);
+        debug(`[docker] зависимый (links): ${serviceName} -> ${targetService}`);
       }
     }
 
-    if (dependents.length === 0) {
-      info('[DEPS] Зависимых контейнеров не найдено');
-    } else {
-      info(`[DEPS] Найдено ${dependents.length} зависимых контейнеров`);
+    if (dependents.length > 0) {
+      info(`[docker] ${targetService}: ${dependents.length} зависимых контейнеров`);
     }
 
     return dependents;
   } catch (err) {
-    warn(`[DEPS] Ошибка поиска зависимостей: ${(err as Error).message}`);
+    warn(`[docker] Ошибка поиска зависимостей: ${(err as Error).message}`);
     return [];
   }
 }
 
 async function recreateContainerCore(containerInfo: ContainerInfo): Promise<void> {
-  const service = containerInfo.Labels?.['com.docker.compose.service'] ?? containerInfo.Names?.[0]?.replace(/^\//, '') ?? containerInfo.Id.slice(0, 12);
-  const container = docker.getContainer(containerInfo.Id);
+  const name = containerInfo.Labels?.['com.docker.compose.service']
+    ?? containerInfo.Names?.[0]?.replace(/^\//, '')
+    ?? containerInfo.Id.slice(0, 12);
 
-  info(`[API] Сохраняем конфигурацию контейнера ${service}...`);
+  const container = docker.getContainer(containerInfo.Id);
   const containerData = await container.inspect();
 
   if (containerInfo.State === 'running') {
-    info(`[API] Останавливаем контейнер ${service}...`);
+    debug(`[docker] ${name}: остановка`);
     await container.stop({ t: 10 });
-    info(`[API] Контейнер ${service} остановлен`);
-  } else {
-    info(`[API] Контейнер ${service} уже остановлен`);
   }
 
-  info(`[API] Удаляем контейнер ${service}...`);
+  debug(`[docker] ${name}: удаление`);
   await container.remove({ force: true });
-  info(`[API] Контейнер ${service} удален`);
 
-  info(`[API] Пересоздаем контейнер ${service} с обновленными переменными...`);
   const createOptions = {
     Image: containerData.Config.Image,
     name: containerData.Name.replace(/^\//, ''),
@@ -140,7 +105,7 @@ async function recreateContainerCore(containerInfo: ContainerInfo): Promise<void
     },
   };
 
-  info(`[API] Создаем новый контейнер с именем: ${createOptions.name}`);
+  debug(`[docker] ${name}: создание`);
   const newContainer = await docker.createContainer(createOptions);
 
   if (containerData.NetworkSettings?.Networks) {
@@ -152,146 +117,101 @@ async function recreateContainerCore(containerInfo: ContainerInfo): Promise<void
             Container: newContainer.id,
             EndpointConfig: { Aliases: networkConfig.Aliases },
           });
-          info(`[API] Подключен к сети: ${networkName}`);
+          debug(`[docker] ${name}: подключён к ${networkName}`);
         } catch (netErr) {
-          warn(`[API] Не удалось подключить к сети ${networkName}: ${(netErr as Error).message}`);
+          warn(`[docker] ${name}: не удалось подключить к ${networkName}: ${(netErr as Error).message}`);
         }
       }
     }
   }
 
   await newContainer.start();
-  info(`[API] Контейнер ${service} успешно пересоздан`);
+  info(`[docker] ${name}: пересоздан`);
 }
 
 async function recreateViaDockerAPI(project: string, service: string): Promise<void> {
-  try {
-    info(`[API] Пересоздание контейнера ${service} через Docker API`);
+  const containers = await docker.listContainers({
+    all: true,
+    filters: {
+      name: [service],
+      label: [`com.docker.compose.project=${project}`],
+    },
+  });
 
-    const containers = await docker.listContainers({
-      all: true,
-      filters: {
-        name: [service],
-        label: [`com.docker.compose.project=${project}`],
-      },
-    });
+  if (containers.length === 0) {
+    error(`[docker] ${service}: не найден в проекте ${project}`);
+    return;
+  }
 
-    if (containers.length === 0) {
-      error(`[API] Контейнер ${service} не найден в проекте ${project}`);
-      return;
+  const containerInfo = containers[0] as ContainerInfo;
+  debug(`[docker] ${service}: найден (${containerInfo.Id.slice(0, 12)})`);
+
+  const dependentContainers = await findDependentContainers(project, service);
+  const stoppedDependents: { id: string; name: string; wasRunning: boolean }[] = [];
+
+  for (const depContainer of dependentContainers) {
+    const depName = depContainer.Labels?.['com.docker.compose.service']
+      ?? depContainer.Names?.[0]?.replace(/^\//, '')
+      ?? depContainer.Id.slice(0, 12);
+    const wasRunning = depContainer.State === 'running';
+
+    if (wasRunning) {
+      debug(`[docker] остановка зависимого: ${depName}`);
+      await docker.getContainer(depContainer.Id).stop({ t: 10 });
     }
 
-    const containerInfo = containers[0] as ContainerInfo;
-    info(`[API] Найден контейнер ${service} (${containerInfo.Id.slice(0, 12)})`);
+    stoppedDependents.push({ id: depContainer.Id, name: depName, wasRunning });
+  }
 
-    const dependentContainers = await findDependentContainers(project, service);
-    const stoppedDependents: { id: string; name: string; wasRunning: boolean }[] = [];
+  await recreateContainerCore(containerInfo);
 
-    for (const depContainer of dependentContainers) {
-      const depService = depContainer.Labels?.['com.docker.compose.service'] ?? depContainer.Names?.[0]?.replace(/^\//, '') ?? depContainer.Id.slice(0, 12);
-      const wasRunning = depContainer.State === 'running';
+  for (const dependent of stoppedDependents) {
+    if (!dependent.wasRunning) continue;
+    try {
+      const currentDepContainers = await docker.listContainers({
+        all: true,
+        filters: {
+          label: [`com.docker.compose.project=${project}`],
+          name: [dependent.name],
+        },
+      });
 
-      if (wasRunning) {
-        info(`[DEPS] Останавливаем зависимый контейнер: ${depService}`);
-        const depDockerContainer = docker.getContainer(depContainer.Id);
-        await depDockerContainer.stop({ t: 10 });
-        info(`[DEPS] Контейнер ${depService} остановлен`);
+      if (currentDepContainers.length > 0) {
+        await docker.getContainer(currentDepContainers[0].Id).start();
+      } else {
+        await docker.getContainer(dependent.id).start();
       }
-
-      stoppedDependents.push({ id: depContainer.Id, name: depService, wasRunning });
+      info(`[docker] зависимый ${dependent.name}: запущен`);
+    } catch (depErr) {
+      warn(`[docker] зависимый ${dependent.name}: ошибка запуска: ${(depErr as Error).message}`);
     }
-
-    await recreateContainerCore(containerInfo);
-
-    if (stoppedDependents.length > 0) {
-      info('[DEPS] Восстанавливаем зависимые контейнеры...');
-
-      for (const dependent of stoppedDependents) {
-        if (dependent.wasRunning) {
-          try {
-            const currentDepContainers = await docker.listContainers({
-              all: true,
-              filters: {
-                label: [`com.docker.compose.project=${project}`],
-                name: [dependent.name],
-              },
-            });
-
-            if (currentDepContainers.length > 0) {
-              const currentDepContainer = docker.getContainer(currentDepContainers[0].Id);
-              await currentDepContainer.start();
-            } else {
-              const depContainer = docker.getContainer(dependent.id);
-              await depContainer.start();
-            }
-            info(`[DEPS] Запущен зависимый контейнер: ${dependent.name}`);
-          } catch (depErr) {
-            warn(`[DEPS] Ошибка запуска зависимого контейнера ${dependent.name}: ${(depErr as Error).message}`);
-          }
-        } else {
-          info(`[DEPS] Контейнер ${dependent.name} не был запущен, оставляем остановленным`);
-        }
-      }
-
-      info('[DEPS] Восстановление зависимых контейнеров завершено');
-    }
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    error(`[API] Ошибка при работе с контейнером ${service}: ${errorMessage}`);
-    throw new Error(`Ошибка Docker API: ${errorMessage}`);
   }
 }
 
-
-// Единственная функция для пересоздания контейнеров
 export async function recreateContainer(containerName: string): Promise<void> {
   try {
-    info(`[RECREATE] Начинаем пересоздание контейнера ${containerName}`);
-
-    // Ищем информацию о контейнере
     const containers = await docker.listContainers({
       all: true,
       filters: { name: [containerName] },
     });
 
     if (containers.length === 0) {
-      error(`Контейнер ${containerName} не найден`);
+      error(`[docker] ${containerName}: не найден`);
       return;
     }
 
-    // Получаем информацию о контейнере
     const containerInfo = containers[0] as ContainerInfo;
-    const labels = containerInfo.Labels || {};
-
-    // Проверяем, запущен ли контейнер через docker-compose
-    const composeInfo = extractComposeInfo(labels);
+    const composeInfo = extractComposeInfo(containerInfo.Labels || {});
 
     if (composeInfo) {
-      // Контейнер управляется через Docker Compose
-      info(
-        `[API] Контейнер ${containerName} управляется через Docker Compose ` +
-          `(проект: ${composeInfo.project}, сервис: ${composeInfo.service})`
-      );
-
-      // Пересоздаем контейнер через Docker API
+      debug(`[docker] ${containerName}: compose (${composeInfo.project}/${composeInfo.service})`);
       await recreateViaDockerAPI(composeInfo.project, composeInfo.service);
-
-      info(
-        `[API] Контейнер ${containerName} успешно пересоздан через Docker API`
-      );
     } else {
-      info(`[API] Контейнер ${containerName} — standalone, пересоздаем без Compose`);
+      debug(`[docker] ${containerName}: standalone`);
       await recreateContainerCore(containerInfo);
     }
   } catch (err) {
-    error(
-      `Ошибка при пересоздании контейнера ${containerName}: ${(err as Error).message}`
-    );
+    error(`[docker] ${containerName}: ошибка пересоздания: ${(err as Error).message}`);
     throw err;
   }
-}
-
-export async function recreateService(service: ServiceConfig): Promise<void> {
-  // Пересоздание контейнера
-  await recreateContainer(service.container);
 }

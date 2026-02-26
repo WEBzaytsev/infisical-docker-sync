@@ -9,28 +9,18 @@ const schema = Joi.object({
   siteUrl: Joi.string().uri().required(),
   clientId: Joi.string().required(),
   clientSecret: Joi.string().required(),
-  syncInterval: Joi.number()
-    .integer()
-    .min(10)
-    .description('Интервал проверки обновлений в секундах')
-    .default(60),
+  syncInterval: Joi.number().integer().min(10).default(60),
   logLevel: Joi.string()
     .valid(...Object.values(LOG_LEVELS))
-    .description('Уровень логирования (debug, info, none)')
     .default(LOG_LEVELS.INFO),
   services: Joi.array().items(
     Joi.object({
       container: Joi.string().required(),
-      envFileName: Joi.string().required().description('Имя файла .env'),
-      envDir: Joi.string()
-        .required()
-        .description('Директория для env файла (монтированная в хост)'),
+      envFileName: Joi.string().required(),
+      envDir: Joi.string().required(),
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
-      syncInterval: Joi.number()
-        .integer()
-        .min(10)
-        .description('Переопределение интервала для конкретного сервиса'),
+      syncInterval: Joi.number().integer().min(10),
       overrides: Joi.object({
         siteUrl: Joi.string().uri(),
         clientId: Joi.string(),
@@ -40,45 +30,35 @@ const schema = Joi.object({
   ),
 });
 
-export async function loadConfig(configPath?: string): Promise<Config> {
-  // Определяем путь к файлу конфигурации
-  const filePath = configPath || process.env.CONFIG_PATH || './config.yaml';
-
+export async function loadConfig(configPath: string): Promise<Config> {
   try {
-    // Преобразуем относительный путь в абсолютный, если необходимо
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.resolve(process.cwd(), filePath);
-    info(`Загрузка конфигурации из: ${absolutePath}`);
+    const absolutePath = path.isAbsolute(configPath)
+      ? configPath
+      : path.resolve(process.cwd(), configPath);
 
     const raw = await fs.readFile(absolutePath, 'utf8');
     const parsed = YAML.parse(raw);
 
-    // Обратная совместимость: envFile -> envFileName
+    // envFile -> envFileName: обратная совместимость
     if (parsed.services) {
       for (const service of parsed.services) {
         if (service.envFile && !service.envFileName) {
           service.envFileName = service.envFile;
           delete service.envFile;
         }
-        // envDir теперь обязательный - старый fallback удален
       }
     }
 
-    const { error, value } = schema.validate(parsed);
+    const { error: validationError, value } = schema.validate(parsed);
 
-    if (error) {
-      throw new Error(`Ошибка валидации конфигурации: ${error.message}`);
+    if (validationError) {
+      throw new Error(`Валидация: ${validationError.message}`);
     }
 
-    for (const service of value.services) {
-      const envPath = path.join(service.envDir, service.envFileName);
-      info(`[ENV] Env файл для ${service.container}: ${envPath}`);
-    }
-
+    info(`[config] Загружено: ${value.services.length} сервисов из ${absolutePath}`);
     return value as Config;
   } catch (err) {
-    error(`Ошибка загрузки конфига из ${filePath}: ${(err as Error).message}`);
+    error(`[config] Ошибка загрузки: ${(err as Error).message}`);
     throw err;
   }
 }
