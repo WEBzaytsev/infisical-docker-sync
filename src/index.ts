@@ -41,7 +41,7 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
       await fs.writeFile(envPath, envText);
       await updateServiceState(service.container, envPath, envText, variableCount);
       info(`[sync] ${service.container}: записано ${variableCount} vars, пересоздание контейнера`);
-      await recreateContainer(service.container);
+      await recreateContainer(service.container, envVars);
     }
   } catch (err) {
     error(`[sync] ${service.container}: ${(err as Error).message}`);

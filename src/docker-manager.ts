@@ -1,5 +1,6 @@
 import Docker from 'dockerode';
 import { info, error, warn, debug } from './logger.js';
+import { EnvVars } from './types.js';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -70,7 +71,21 @@ async function findDependentContainers(project: string, targetService: string): 
   }
 }
 
-async function recreateContainerCore(containerInfo: ContainerInfo): Promise<void> {
+function mergeEnv(existingEnv: string[], newVars: EnvVars): string[] {
+  const envMap = new Map<string, string>();
+  for (const entry of existingEnv) {
+    const eqIdx = entry.indexOf('=');
+    if (eqIdx > 0) {
+      envMap.set(entry.substring(0, eqIdx), entry.substring(eqIdx + 1));
+    }
+  }
+  for (const [key, value] of Object.entries(newVars)) {
+    envMap.set(key, value);
+  }
+  return Array.from(envMap.entries()).map(([k, v]) => `${k}=${v}`);
+}
+
+async function recreateContainerCore(containerInfo: ContainerInfo, envVars?: EnvVars): Promise<void> {
   const name = containerInfo.Labels?.['com.docker.compose.service']
     ?? containerInfo.Names?.[0]?.replace(/^\//, '')
     ?? containerInfo.Id.slice(0, 12);
@@ -86,10 +101,17 @@ async function recreateContainerCore(containerInfo: ContainerInfo): Promise<void
   debug(`[docker] ${name}: удаление`);
   await container.remove({ force: true });
 
+  const existingEnv = containerData.Config.Env || [];
+  const finalEnv = envVars ? mergeEnv(existingEnv, envVars) : existingEnv;
+
+  if (envVars) {
+    debug(`[docker] ${name}: обновлено ${Object.keys(envVars).length} env vars`);
+  }
+
   const createOptions = {
     Image: containerData.Config.Image,
     name: containerData.Name.replace(/^\//, ''),
-    Env: containerData.Config.Env,
+    Env: finalEnv,
     Labels: containerData.Config.Labels,
     WorkingDir: containerData.Config.WorkingDir,
     Cmd: containerData.Config.Cmd,
@@ -129,7 +151,7 @@ async function recreateContainerCore(containerInfo: ContainerInfo): Promise<void
   info(`[docker] ${name}: пересоздан`);
 }
 
-async function recreateViaDockerAPI(project: string, service: string): Promise<void> {
+async function recreateViaDockerAPI(project: string, service: string, envVars?: EnvVars): Promise<void> {
   const containers = await docker.listContainers({
     all: true,
     filters: {
@@ -163,7 +185,7 @@ async function recreateViaDockerAPI(project: string, service: string): Promise<v
     stoppedDependents.push({ id: depContainer.Id, name: depName, wasRunning });
   }
 
-  await recreateContainerCore(containerInfo);
+  await recreateContainerCore(containerInfo, envVars);
 
   for (const dependent of stoppedDependents) {
     if (!dependent.wasRunning) continue;
@@ -188,7 +210,7 @@ async function recreateViaDockerAPI(project: string, service: string): Promise<v
   }
 }
 
-export async function recreateContainer(containerName: string): Promise<void> {
+export async function recreateContainer(containerName: string, envVars?: EnvVars): Promise<void> {
   try {
     const containers = await docker.listContainers({
       all: true,
@@ -205,10 +227,10 @@ export async function recreateContainer(containerName: string): Promise<void> {
 
     if (composeInfo) {
       debug(`[docker] ${containerName}: compose (${composeInfo.project}/${composeInfo.service})`);
-      await recreateViaDockerAPI(composeInfo.project, composeInfo.service);
+      await recreateViaDockerAPI(composeInfo.project, composeInfo.service, envVars);
     } else {
       debug(`[docker] ${containerName}: standalone`);
-      await recreateContainerCore(containerInfo);
+      await recreateContainerCore(containerInfo, envVars);
     }
   } catch (err) {
     error(`[docker] ${containerName}: ошибка пересоздания: ${(err as Error).message}`);
