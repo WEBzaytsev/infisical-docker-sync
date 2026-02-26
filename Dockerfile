@@ -34,7 +34,10 @@ COPY --from=builder /app/dist ./dist
 # Директория для данных агента (конфиг + состояние)
 RUN mkdir -p /app/data
 
-# Docker CLI не нужен - используем только Docker API через socket
+# Пример конфига — копируется при первом запуске если нет config.yaml
+COPY config.example.yaml /app/config.example.yaml
+
+VOLUME ["/app/data"]
 
 ENV NODE_ENV=production
-CMD ["node", "dist/index.js"]
+CMD ["bash", "-c", "[ -f /app/data/config.yaml ] || { cp /app/config.example.yaml /app/data/config.yaml; echo 'Создан config.yaml из примера'; }; exec node dist/index.js"]

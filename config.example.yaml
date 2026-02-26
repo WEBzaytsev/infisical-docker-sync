@@ -1,0 +1,20 @@
+# Infisical Docker Sync — пример конфигурации
+# Скопируйте в /app/data/config.yaml и заполните значения
+
+siteUrl: https://app.infisical.com
+clientId: your-client-id
+clientSecret: your-client-secret
+syncInterval: 60       # секунды, минимум 10
+logLevel: info         # debug | info | silent
+
+services:
+  - container: my-backend
+    projectId: your-project-id
+    environment: dev
+    envDir: /app/data/envs
+    envFileName: .env
+    # syncInterval: 120  # переопределение глобального интервала
+    # overrides:         # переопределение глобальных credentials
+    #   siteUrl: https://custom.infisical.com
+    #   clientId: other-client-id
+    #   clientSecret: other-client-secret
