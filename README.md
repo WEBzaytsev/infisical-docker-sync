@@ -206,19 +206,19 @@ services:
 
 ```bash
 # Поставь зависимости
-npm install
+pnpm install
 
 # Запусти в dev режиме
-npm run dev
+pnpm dev
 
 # Собери
-npm run build
+pnpm build
 
 # Проверь код (строго!)
-npm run check
+pnpm check
 
 # Исправь что можно автоматически
-npm run lint:fix
+pnpm lint:fix
 ```
 
 ### Структура проекта

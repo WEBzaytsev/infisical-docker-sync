@@ -1,19 +1,27 @@
 # syntax=docker/dockerfile:1.7
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+
 # Ускоряем и фиксируем deps
-COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,target=/pnpm/store pnpm install --frozen-lockfile
 
 COPY tsconfig.json ./
 COPY src ./src
-RUN npm run build
+RUN pnpm run build
 
 # ——— Runtime ———
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Устанавливаем bash с pipefail для безопасности pipe команд
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -25,8 +33,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
     && rm -rf /var/lib/apt/lists/*
 
 # Прод-зависимости только нужные рантайму
-COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,target=/pnpm/store pnpm install --prod --frozen-lockfile
 
 # Артефакты сборки
 COPY --from=builder /app/dist ./dist

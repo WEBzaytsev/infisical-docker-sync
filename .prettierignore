@@ -24,6 +24,7 @@ coverage/
 *.tgz
 package-lock.json
 yarn.lock
+pnpm-lock.yaml
 
 # Docker
 Dockerfile
