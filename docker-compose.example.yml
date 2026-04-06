@@ -1,0 +1,48 @@
+# Пример развёртывания infisical-docker-sync + recreate-proxy
+#
+# 1. Скопируй:  cp docker-compose.example.yml docker-compose.yml
+# 2. Создай .env (см. README): PROXY_TOKEN, DOCKER_GID
+# 3. Создай ./data/config.yaml (или дождись автогенерации при первом старте)
+# 4. Подставь свои volume — каталоги, где у приложений лежит .env
+# 5. docker compose up -d
+
+services:
+  recreate-proxy:
+    image: ghcr.io/webzaytsev/infisical-docker-sync:latest
+    container_name: recreate-proxy
+    command: ["dist/proxy/server.js"]
+    restart: unless-stopped
+    environment:
+      - PROXY_TOKEN=${PROXY_TOKEN}
+      - CONTAINER_NAME=recreate-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    group_add:
+      - "${DOCKER_GID:-999}"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    networks: [proxynet]
+
+  infisical-docker-sync:
+    image: ghcr.io/webzaytsev/infisical-docker-sync:latest
+    container_name: infisical-docker-sync
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      - PROXY_URL=http://recreate-proxy:8080
+      - PROXY_TOKEN=${PROXY_TOKEN}
+      - TZ=Europe/Moscow
+    volumes:
+      - ./data:/app/data
+      - ${HOME}/projects/my-app:/projects/my-app
+      - ${HOME}/projects/my-worker:/projects/my-worker
+    depends_on: [recreate-proxy]
+    networks:
+      - proxynet
+      - default
+
+networks:
+  proxynet:
+    internal: true

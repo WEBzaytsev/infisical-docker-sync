@@ -8,6 +8,7 @@ import { setLogLevel, info, debug, error, warn } from './logger.js';
 import { stateManager } from './state-manager.js';
 
 import fs from 'fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'path';
 import { Config, ServiceConfig, InfisicalCredentials } from './types.js';
 
@@ -31,17 +32,32 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
     }
 
     const variableCount = Object.keys(envVars).length;
-    const envText = envToDotenvFormat(envVars);
     const envPath = path.join(service.envDir, service.envFileName);
+    const absPath = path.resolve(envPath);
+    const absDir = path.resolve(service.envDir);
+
+    if (!absPath.startsWith(absDir + path.sep) && absPath !== absDir) {
+      throw new Error(`Небезопасный путь: ${absPath} выходит за пределы ${absDir}`);
+    }
 
     await ensureEnvDir(envPath);
-    const changed = await hasChanged(service.container, envPath, envText, variableCount);
+    const diff = await hasChanged(service.container, envPath, envVars);
 
-    if (changed) {
-      await fs.writeFile(envPath, envText);
+    if (diff.hasDiff) {
+      const envText = envToDotenvFormat(envVars);
+      await fs.writeFile(envPath, envText, { mode: 0o600 });
+      await fs.chmod(envPath, 0o600);
+      const written = await fs.stat(envPath);
+      debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
       await updateServiceState(service.container, envPath, envText, variableCount);
       info(`[sync] ${service.container}: записано ${variableCount} vars, пересоздание контейнера`);
-      await recreateContainer(service.container, envVars);
+      await recreateContainer(service.container, envVars, diff.removed);
+      const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
+      if (changedKeys.length > 0) {
+        debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);
+      }
+    } else {
+      debug(`[sync] ${service.container}: нет изменений, файл не записан: ${absPath}`);
     }
   } catch (err) {
     error(`[sync] ${service.container}: ${(err as Error).message}`);
@@ -93,6 +109,13 @@ async function recreateConfig(): Promise<void> {
 
 async function main(): Promise<void> {
   info('[config] Запуск Infisical Docker Sync');
+
+  const examplePath = '/app/config.example.yaml';
+  if (!existsSync(configPath) && existsSync(examplePath)) {
+    await fs.copyFile(examplePath, configPath);
+    await fs.chmod(configPath, 0o600);
+    info('[config] Создан config.yaml из примера');
+  }
 
   try {
     await stateManager.loadState();

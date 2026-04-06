@@ -1,12 +1,18 @@
 import { InfisicalSDK } from '@infisical/sdk';
+import { createHash } from 'crypto';
 import { error, debug } from './logger.js';
 import { InfisicalCredentials, EnvVars, SecretResponse } from './types.js';
 
 const sdkCache = new Map<string, InfisicalSDK>();
 const authCache = new Map<string, Promise<unknown>>();
 
+// L1: не храним clientSecret в ключе кэша — хешируем чтобы убрать
+// plaintext-секрет из памяти Map (heap-dump защита)
 function getCacheKey(creds: { siteUrl: string; clientId: string; clientSecret: string }): string {
-  return `${creds.siteUrl}|${creds.clientId}|${creds.clientSecret}`;
+  const hash = createHash('sha256')
+    .update(`${creds.siteUrl}|${creds.clientId}|${creds.clientSecret}`)
+    .digest('hex');
+  return hash;
 }
 
 async function getAuthenticatedSdk(creds: {
@@ -32,7 +38,7 @@ async function getAuthenticatedSdk(creds: {
       });
     authCache.set(key, authPromise);
   }
-  await authCache.get(key)!;
+  await authCache.get(key);
 
   return sdk;
 }

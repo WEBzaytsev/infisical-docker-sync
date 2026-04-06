@@ -65,3 +65,14 @@ export interface ServiceState {
   lastSync: string;
   variableCount: number;
 }
+
+export interface RecreateRequest {
+  container: string;
+  env?: EnvVars;
+  removed?: string[];
+}
+
+export interface RecreateResponse {
+  ok: boolean;
+  error?: string;
+}
