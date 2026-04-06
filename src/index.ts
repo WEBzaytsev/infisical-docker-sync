@@ -31,13 +31,13 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
     }
 
     const variableCount = Object.keys(envVars).length;
-    const envText = envToDotenvFormat(envVars);
     const envPath = path.join(service.envDir, service.envFileName);
 
     await ensureEnvDir(envPath);
-    const changed = await hasChanged(service.container, envPath, envText, variableCount);
+    const changed = await hasChanged(service.container, envPath, envVars);
 
     if (changed) {
+      const envText = envToDotenvFormat(envVars);
       await fs.writeFile(envPath, envText);
       await updateServiceState(service.container, envPath, envText, variableCount);
       info(`[sync] ${service.container}: записано ${variableCount} vars, пересоздание контейнера`);
