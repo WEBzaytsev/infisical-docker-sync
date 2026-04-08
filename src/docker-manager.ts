@@ -148,7 +148,7 @@ async function recreateContainerCore(containerInfo: ContainerInfo, envVars?: Env
   }
 
   await newContainer.start();
-  info(`[docker] ${name}: пересоздан`);
+  info(`[docker] ${name}: пересоздан (${newContainer.id.slice(0, 12)})`);
 }
 
 async function recreateViaDockerAPI(project: string, service: string, envVars?: EnvVars): Promise<void> {

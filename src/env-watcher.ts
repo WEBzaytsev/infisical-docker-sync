@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { constants as fsConstants } from 'fs';
 import crypto from 'crypto';
 import path from 'path';
 import { info, error, debug } from './logger.js';
@@ -22,11 +23,18 @@ function diffEnvVars(
   return { added, removed, changed };
 }
 
+export interface EnvDiff {
+  hasDiff: boolean;
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+
 export async function hasChanged(
   serviceName: string,
   filePath: string,
   envVars: EnvVars
-): Promise<boolean> {
+): Promise<EnvDiff> {
   try {
     let diskVars: EnvVars = {};
 
@@ -35,7 +43,7 @@ export async function hasChanged(
       diskVars = parseDotenvContent(diskContent);
     } catch {
       info(`[sync] ${serviceName}: файл не найден, создаём`);
-      return true;
+      return { hasDiff: true, added: Object.keys(envVars), removed: [], changed: [] };
     }
 
     const { added, removed, changed } = diffEnvVars(diskVars, envVars);
@@ -52,10 +60,10 @@ export async function hasChanged(
       info(`[sync] ${serviceName}: без изменений, ${Object.keys(envVars).length} vars`);
     }
 
-    return hasDiff;
+    return { hasDiff, added, removed, changed };
   } catch (err) {
     error(`[sync] ${serviceName}: ошибка проверки: ${(err as Error).message}`);
-    return true;
+    return { hasDiff: true, added: [], removed: [], changed: [] };
   }
 }
 
@@ -75,5 +83,11 @@ export async function updateServiceState(
 }
 
 export async function ensureEnvDir(filePath: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true });
+  try {
+    await fs.access(dir, fsConstants.W_OK);
+  } catch {
+    throw new Error(`envDir недоступен для записи: ${dir}`);
+  }
 }

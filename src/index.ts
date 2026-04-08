@@ -34,14 +34,20 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
     const envPath = path.join(service.envDir, service.envFileName);
 
     await ensureEnvDir(envPath);
-    const changed = await hasChanged(service.container, envPath, envVars);
+    const diff = await hasChanged(service.container, envPath, envVars);
 
-    if (changed) {
+    if (diff.hasDiff) {
       const envText = envToDotenvFormat(envVars);
+      const absPath = path.resolve(envPath);
       await fs.writeFile(envPath, envText);
+      debug(`[sync] ${service.container}: env записан → ${absPath}`);
       await updateServiceState(service.container, envPath, envText, variableCount);
       info(`[sync] ${service.container}: записано ${variableCount} vars, пересоздание контейнера`);
       await recreateContainer(service.container, envVars);
+      const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
+      if (changedKeys.length > 0) {
+        debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);
+      }
     }
   } catch (err) {
     error(`[sync] ${service.container}: ${(err as Error).message}`);
