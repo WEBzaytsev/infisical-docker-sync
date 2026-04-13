@@ -98,9 +98,37 @@ export async function updateServiceState(
 export async function ensureEnvDir(filePath: string): Promise<void> {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true });
+
+  const uid = process.getuid?.() ?? '?';
+  const gid = process.getgid?.() ?? '?';
+  debug(`[sync] процесс: uid=${uid}, gid=${gid}`);
+
+  try {
+    const dirStat = await fs.stat(dir);
+    const mode = (dirStat.mode & 0o777).toString(8);
+    debug(`[sync] директория ${dir}: uid=${dirStat.uid}, gid=${dirStat.gid}, mode=0${mode}`);
+  } catch {
+    // stat не критичен
+  }
+
   try {
     await fs.access(dir, fsConstants.W_OK);
+    debug(`[sync] директория ${dir}: доступ на запись OK`);
   } catch {
-    throw new Error(`envDir недоступен для записи: ${dir}`);
+    throw new Error(`envDir недоступен для записи: ${dir} (процесс uid=${uid}, gid=${gid})`);
+  }
+
+  try {
+    await fs.access(filePath, fsConstants.F_OK);
+    const fileStat = await fs.stat(filePath);
+    const mode = (fileStat.mode & 0o777).toString(8);
+    debug(`[sync] файл ${filePath}: uid=${fileStat.uid}, gid=${fileStat.gid}, mode=0${mode}`);
+    await fs.access(filePath, fsConstants.W_OK);
+    debug(`[sync] файл ${filePath}: доступ на запись OK`);
+  } catch (err) {
+    const msg = (err as NodeJS.ErrnoException).message;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      debug(`[sync] файл ${filePath}: нет доступа на запись — ${msg}`);
+    }
   }
 }
