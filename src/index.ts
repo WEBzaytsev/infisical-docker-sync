@@ -32,15 +32,16 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
 
     const variableCount = Object.keys(envVars).length;
     const envPath = path.join(service.envDir, service.envFileName);
+    const absPath = path.resolve(envPath);
 
     await ensureEnvDir(envPath);
     const diff = await hasChanged(service.container, envPath, envVars);
 
     if (diff.hasDiff) {
       const envText = envToDotenvFormat(envVars);
-      const absPath = path.resolve(envPath);
       await fs.writeFile(envPath, envText);
-      debug(`[sync] ${service.container}: env записан → ${absPath}`);
+      const written = await fs.stat(envPath);
+      debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
       await updateServiceState(service.container, envPath, envText, variableCount);
       info(`[sync] ${service.container}: записано ${variableCount} vars, пересоздание контейнера`);
       await recreateContainer(service.container, envVars);
@@ -48,6 +49,8 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
       if (changedKeys.length > 0) {
         debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);
       }
+    } else {
+      debug(`[sync] ${service.container}: нет изменений, файл не записан: ${absPath}`);
     }
   } catch (err) {
     error(`[sync] ${service.container}: ${(err as Error).message}`);

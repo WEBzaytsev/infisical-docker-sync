@@ -37,11 +37,20 @@ export async function hasChanged(
 ): Promise<EnvDiff> {
   try {
     let diskVars: EnvVars = {};
+    let diskContent = '';
+
+    debug(`[sync] ${serviceName}: проверяем ${filePath}`);
 
     try {
-      const diskContent = await fs.readFile(filePath, 'utf8');
+      const stat = await fs.stat(filePath);
+      debug(
+        `[sync] ${serviceName}: файл существует, size=${stat.size}б, mtime=${stat.mtime.toISOString()}`
+      );
+      diskContent = await fs.readFile(filePath, 'utf8');
       diskVars = parseDotenvContent(diskContent);
+      debug(`[sync] ${serviceName}: диск=${Object.keys(diskVars).length} vars, remote=${Object.keys(envVars).length} vars`);
     } catch {
+      debug(`[sync] ${serviceName}: файл не найден → создаём`);
       info(`[sync] ${serviceName}: файл не найден, создаём`);
       return { hasDiff: true, added: Object.keys(envVars), removed: [], changed: [] };
     }
@@ -57,6 +66,10 @@ export async function hasChanged(
         `[sync] ${serviceName}: изменений ${added.length + removed.length + changed.length} (+ ${added.length} - ${removed.length} ~ ${changed.length})`
       );
     } else {
+      const diskHash = crypto.createHash('sha256').update(diskContent).digest('hex').slice(0, 12);
+      const remoteContent = Object.entries(envVars).map(([k, v]) => `${k}=${v}`).sort().join('\n');
+      const remoteHash = crypto.createHash('sha256').update(remoteContent).digest('hex').slice(0, 12);
+      debug(`[sync] ${serviceName}: хэш диска=${diskHash}, хэш remote=${remoteHash}`);
       info(`[sync] ${serviceName}: без изменений, ${Object.keys(envVars).length} vars`);
     }
 
