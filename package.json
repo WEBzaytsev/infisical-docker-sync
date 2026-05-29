@@ -16,33 +16,33 @@
     "check": "pnpm run type-check && pnpm run lint && pnpm run build"
   },
   "dependencies": {
-    "@infisical/sdk": "^5.0.0",
-    "chokidar": "^5.0.0",
-    "dockerode": "^4.0.10",
-    "joi": "^18.1.2",
-    "pino": "^10.3.1",
-    "pino-pretty": "^13.1.3",
-    "yaml": "^2.8.3"
+    "@infisical/sdk": "5.0.2",
+    "chokidar": "5.0.0",
+    "dockerode": "5.0.0",
+    "joi": "18.2.1",
+    "pino": "10.3.1",
+    "pino-pretty": "13.1.3",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/dockerode": "^4.0.1",
-    "@types/node": "^25.5.2",
-    "@typescript-eslint/eslint-plugin": "^8.58.0",
-    "@typescript-eslint/parser": "^8.58.0",
-    "eslint": "^10.2.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-import-x": "^4.16.2",
-    "eslint-plugin-only-warn": "^1.2.1",
-    "eslint-plugin-unicorn": "^64.0.0",
-    "globals": "^17.4.0",
-    "prettier": "^3.8.1",
-    "rimraf": "^6.1.3",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
-    "typescript-eslint": "^8.58.0"
+    "@eslint/js": "10.0.1",
+    "@types/dockerode": "4.0.1",
+    "@types/node": "25.9.1",
+    "@typescript-eslint/eslint-plugin": "8.60.0",
+    "@typescript-eslint/parser": "8.60.0",
+    "eslint": "10.4.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-import-x": "4.16.2",
+    "eslint-plugin-only-warn": "1.2.1",
+    "eslint-plugin-unicorn": "64.0.0",
+    "globals": "17.6.0",
+    "prettier": "3.8.3",
+    "rimraf": "6.1.3",
+    "tsx": "4.22.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.60.0"
   },
   "overrides": {
-    "fast-xml-parser": "^5.3.5"
+    "fast-xml-parser": "5.3.5"
   }
 }
