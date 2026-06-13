@@ -6,7 +6,7 @@ import { info, error } from './logger.js';
 import { LOG_LEVELS, Config } from './types.js';
 
 const schema = Joi.object({
-  siteUrl: Joi.string().uri().required(),
+  siteUrl: Joi.string().uri({ scheme: ['https', 'http'] }).required(),
   clientId: Joi.string().required(),
   clientSecret: Joi.string().required(),
   syncInterval: Joi.number().integer().min(10).default(60),
@@ -16,18 +16,22 @@ const schema = Joi.object({
   services: Joi.array().items(
     Joi.object({
       container: Joi.string().required(),
-      envFileName: Joi.string().required(),
+      // M3: envFileName — только имя файла, без слешей и ..
+      envFileName: Joi.string()
+        .pattern(/^[^/\\]+$/, 'no path separators')
+        .invalid('..', '.')
+        .required(),
       envDir: Joi.string().required(),
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
       syncInterval: Joi.number().integer().min(10),
       overrides: Joi.object({
-        siteUrl: Joi.string().uri(),
+        siteUrl: Joi.string().uri({ scheme: ['https', 'http'] }),
         clientId: Joi.string(),
         clientSecret: Joi.string(),
       }).optional(),
     })
-  ),
+  ).min(1).required(),
 });
 
 export async function loadConfig(configPath: string): Promise<Config> {

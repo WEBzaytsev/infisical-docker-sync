@@ -33,18 +33,24 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
     const variableCount = Object.keys(envVars).length;
     const envPath = path.join(service.envDir, service.envFileName);
     const absPath = path.resolve(envPath);
+    const absDir = path.resolve(service.envDir);
+
+    if (!absPath.startsWith(absDir + path.sep) && absPath !== absDir) {
+      throw new Error(`Небезопасный путь: ${absPath} выходит за пределы ${absDir}`);
+    }
 
     await ensureEnvDir(envPath);
     const diff = await hasChanged(service.container, envPath, envVars);
 
     if (diff.hasDiff) {
       const envText = envToDotenvFormat(envVars);
-      await fs.writeFile(envPath, envText);
+      await fs.writeFile(envPath, envText, { mode: 0o600 });
+      await fs.chmod(envPath, 0o600);
       const written = await fs.stat(envPath);
       debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
       await updateServiceState(service.container, envPath, envText, variableCount);
       info(`[sync] ${service.container}: записано ${variableCount} vars, пересоздание контейнера`);
-      await recreateContainer(service.container, envVars);
+      await recreateContainer(service.container, envVars, diff.removed);
       const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
       if (changedKeys.length > 0) {
         debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);
