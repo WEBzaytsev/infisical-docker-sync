@@ -4,4 +4,10 @@ node_modules
 envs
 .dockerignore
 docker-compose.yml
-README.md 
+README.md
+# D4: секреты и артефакты — не должны попадать в build-контекст
+config.yaml
+*.env
+.env
+data
+dist
