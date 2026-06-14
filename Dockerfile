@@ -18,44 +18,28 @@ RUN pnpm run build
 # Оставляем только prod-зависимости для копирования в runtime
 RUN --mount=type=cache,target=/pnpm/store pnpm prune --prod
 
+# Создаём директорию данных с правами distroless nonroot (uid 65532) для COPY в runtime
+RUN mkdir -p /app/data && chown 65532:65532 /app/data
+
 # ——— Runtime ———
-# D1: тот же digest — оба стейджа используют одну и ту же проверенную версию
-FROM node:22-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752 AS runtime
-ENV DEBIAN_FRONTEND=noninteractive
+# distroless: нет shell, нет apt, нет утилит — минимальный attack surface.
+# nonroot пользователь uid/gid 65532 и CA-сертификаты уже включены в образ.
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:0345e4b3c7509ec058d3f6a2b38be1c4e6e487ce87883a0fd550c40df3f1d346 AS runtime
 WORKDIR /app
-
-# Устанавливаем bash с pipefail для безопасности pipe команд
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Устанавливаем только необходимые пакеты для работы с сертификатами
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# D3: явное создание группы и пользователя без shell и home-директории —
-# сервис-аккаунту они не нужны; убирает кривой || фолбэк.
-# Для прямого docker.sock добавь --group-add $(stat -c '%g' /var/run/docker.sock)
-# или используй docker-socket-proxy (рекомендуется, см. README).
-RUN groupadd --gid 1001 appuser \
- && useradd --uid 1001 --gid 1001 --no-create-home --shell /usr/sbin/nologin appuser
 
 # M4: копируем только prod node_modules из builder — pnpm/corepack в runtime не нужны
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
-# Директория для данных агента (конфиг + состояние)
-RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+# Директория для данных агента (конфиг + состояние), создана в builder с uid 65532
+COPY --from=builder --chown=65532:65532 /app/data ./data
 
-# Пример конфига — копируется при первом запуске если нет config.yaml
-COPY --chown=appuser:appuser config.example.yaml /app/config.example.yaml
+# Пример конфига — копируется при первом запуске если нет config.yaml (логика в index.ts)
+COPY --chown=65532:65532 config.example.yaml /app/config.example.yaml
 
 VOLUME ["/app/data"]
 
-HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
-  CMD kill -0 1 2>/dev/null || exit 1
-
-USER appuser
+USER 65532
 ENV NODE_ENV=production
-# D2: chmod 600 для config.yaml при первом запуске — секреты не должны быть world-readable
-CMD ["bash", "-c", "[ -f /app/data/config.yaml ] || { cp /app/config.example.yaml /app/data/config.yaml; chmod 600 /app/data/config.yaml; echo 'Создан config.yaml из примера'; }; exec node dist/index.js"]
+# distroless ENTRYPOINT уже ["node"], CMD добавляется как аргумент
+CMD ["dist/index.js"]

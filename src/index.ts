@@ -8,6 +8,7 @@ import { setLogLevel, info, debug, error, warn } from './logger.js';
 import { stateManager } from './state-manager.js';
 
 import fs from 'fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'path';
 import { Config, ServiceConfig, InfisicalCredentials } from './types.js';
 
@@ -108,6 +109,13 @@ async function recreateConfig(): Promise<void> {
 
 async function main(): Promise<void> {
   info('[config] Запуск Infisical Docker Sync');
+
+  const examplePath = '/app/config.example.yaml';
+  if (!existsSync(configPath) && existsSync(examplePath)) {
+    await fs.copyFile(examplePath, configPath);
+    await fs.chmod(configPath, 0o600);
+    info('[config] Создан config.yaml из примера');
+  }
 
   try {
     await stateManager.loadState();
