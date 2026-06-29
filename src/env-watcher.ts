@@ -51,7 +51,7 @@ export async function hasChanged(
       debug(`[sync] ${serviceName}: диск=${Object.keys(diskVars).length} vars, remote=${Object.keys(envVars).length} vars`);
     } catch {
       debug(`[sync] ${serviceName}: файл не найден → создаём`);
-      info(`[sync] ${serviceName}: файл не найден, создаём`);
+      info(`[sync] ${serviceName}: .env не найден — создаём из секретов Infisical`);
       return { hasDiff: true, added: Object.keys(envVars), removed: [], changed: [] };
     }
 
@@ -63,19 +63,19 @@ export async function hasChanged(
       if (removed.length > 0) debug(`[sync] ${serviceName}: -${removed.join(', -')}`);
       if (changed.length > 0) debug(`[sync] ${serviceName}: ~${changed.join(', ~')}`);
       info(
-        `[sync] ${serviceName}: изменений ${added.length + removed.length + changed.length} (+ ${added.length} - ${removed.length} ~ ${changed.length})`
+        `[sync] ${serviceName}: изменения в секретах (+${added.length} −${removed.length} ~${changed.length}), обновим .env`
       );
     } else {
       const diskHash = crypto.createHash('sha256').update(diskContent).digest('hex').slice(0, 12);
       const remoteContent = Object.entries(envVars).map(([k, v]) => `${k}=${v}`).sort().join('\n');
       const remoteHash = crypto.createHash('sha256').update(remoteContent).digest('hex').slice(0, 12);
       debug(`[sync] ${serviceName}: хэш диска=${diskHash}, хэш remote=${remoteHash}`);
-      info(`[sync] ${serviceName}: без изменений, ${Object.keys(envVars).length} vars`);
+      info(`[sync] ${serviceName}: секреты актуальны (${Object.keys(envVars).length} переменных), пересоздание не требуется`);
     }
 
     return { hasDiff, added, removed, changed };
   } catch (err) {
-    error(`[sync] ${serviceName}: ошибка проверки: ${(err as Error).message}`);
+    error(`[sync] ${serviceName}: не удалось сравнить .env с Infisical: ${(err as Error).message}`);
     return { hasDiff: true, added: [], removed: [], changed: [] };
   }
 }
@@ -91,7 +91,7 @@ export async function updateServiceState(
     await stateManager.updateServiceState(serviceName, filePath, hash, variableCount);
     debug(`[sync] ${serviceName}: состояние обновлено`);
   } catch (err) {
-    error(`[sync] ${serviceName}: ошибка обновления состояния: ${(err as Error).message}`);
+    error(`[sync] ${serviceName}: не удалось сохранить состояние синхронизации: ${(err as Error).message}`);
   }
 }
 
@@ -115,7 +115,9 @@ export async function ensureEnvDir(filePath: string): Promise<void> {
     await fs.access(dir, fsConstants.W_OK);
     debug(`[sync] директория ${dir}: доступ на запись OK`);
   } catch {
-    throw new Error(`envDir недоступен для записи: ${dir} (процесс uid=${uid}, gid=${gid})`);
+    throw new Error(
+      `Нет прав на запись в envDir (${dir}). Проверьте монтирование volume в compose агента и user (uid=${uid}, gid=${gid})`
+    );
   }
 
   try {

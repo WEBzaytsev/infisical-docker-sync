@@ -11,7 +11,7 @@ const TOKEN = process.env.PROXY_TOKEN;
 const MAX_BODY = 1024 * 1024; // 1 МБ — защита от unbounded body
 
 if (!TOKEN) {
-  error('[proxy] PROXY_TOKEN не задан — отказ запуска');
+  error('[proxy] PROXY_TOKEN не задан — задайте переменную в .env и перезапустите recreate-proxy');
   // eslint-disable-next-line no-process-exit
   process.exit(1);
 }
@@ -61,7 +61,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 
 async function handleRecreate(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   if (!tokenValid(headerToken(req.headers['x-proxy-token']))) {
-    sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    sendJson(res, 401, { ok: false, error: 'неверный или отсутствующий x-proxy-token' });
     return;
   }
 
@@ -69,7 +69,7 @@ async function handleRecreate(req: http.IncomingMessage, res: http.ServerRespons
   try {
     parsed = JSON.parse(await readBody(req));
   } catch {
-    sendJson(res, 400, { ok: false, error: 'invalid json' });
+    sendJson(res, 400, { ok: false, error: 'тело запроса — невалидный JSON' });
     return;
   }
 
@@ -91,14 +91,14 @@ async function handleRecreate(req: http.IncomingMessage, res: http.ServerRespons
 const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/recreate') {
     handleRecreate(req, res).catch((err: unknown) => {
-      error(`[proxy] Необработанная ошибка: ${(err as Error).message}`);
-      if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'internal' });
+      error(`[proxy] Внутренняя ошибка при пересоздании: ${(err as Error).message}`);
+      if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'внутренняя ошибка proxy' });
     });
     return;
   }
-  sendJson(res, 404, { ok: false, error: 'not found' });
+  sendJson(res, 404, { ok: false, error: 'доступен только POST /recreate' });
 });
 
 server.listen(PORT, () => {
-  info(`[proxy] recreate-only proxy слушает :${PORT}`);
+  info(`[proxy] proxy для пересоздания слушает порт ${PORT}`);
 });

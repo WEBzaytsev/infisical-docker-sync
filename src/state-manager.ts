@@ -30,7 +30,7 @@ export class StateManager {
         const loadedState = JSON.parse(stateData) as AgentState;
 
         if (loadedState.version !== STATE_VERSION) {
-          warn(`[state] Версия ${loadedState.version} != ${STATE_VERSION}, сброс`);
+          warn(`[state] Версия состояния ${loadedState.version} устарела (ожидается ${STATE_VERSION}) — сброс`);
           this.state = this.createDefaultState();
           await this.saveState();
           return;
@@ -38,21 +38,21 @@ export class StateManager {
 
         this.state = loadedState;
         const count = Object.keys(this.state.services).length;
-        info(`[state] Загружено состояние: ${count} сервисов`);
+        info(`[state] Загружено состояние синхронизации: ${count} сервисов`);
         for (const [name, s] of Object.entries(this.state.services)) {
           debug(`[state] ${name}: ${s.variableCount} vars, ${s.lastSync}`);
         }
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-          info('[state] Файл состояния не найден, создаём новое');
+          info('[state] Файл состояния не найден — начнём с чистого');
         } else {
-          warn(`[state] Ошибка чтения: ${(err as Error).message}`);
+          warn(`[state] Не удалось прочитать файл состояния: ${(err as Error).message}`);
         }
         this.state = this.createDefaultState();
         await this.saveState();
       }
     } catch (err) {
-      error(`[state] Критическая ошибка: ${(err as Error).message}`);
+      error(`[state] Критическая ошибка состояния: ${(err as Error).message}`);
       this.state = this.createDefaultState();
     }
   }
@@ -64,7 +64,7 @@ export class StateManager {
       await fs.writeFile(STATE_FILE, JSON.stringify(this.state, null, 2), 'utf8');
       debug(`[state] Сохранено (${Object.keys(this.state.services).length} сервисов)`);
     } catch (err) {
-      error(`[state] Ошибка сохранения: ${(err as Error).message}`);
+      error(`[state] Не удалось сохранить состояние синхронизации: ${(err as Error).message}`);
     }
   }
 

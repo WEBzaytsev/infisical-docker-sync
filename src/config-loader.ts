@@ -56,13 +56,13 @@ export async function loadConfig(configPath: string): Promise<Config> {
     const { error: validationError, value } = schema.validate(parsed);
 
     if (validationError) {
-      throw new Error(`Валидация: ${validationError.message}`);
+      throw new Error(`Ошибка конфигурации: ${validationError.message}`);
     }
 
-    info(`[config] Загружено: ${value.services.length} сервисов из ${absolutePath}`);
+    info(`[config] config.yaml загружен: ${value.services.length} сервисов (${absolutePath})`);
     return value as Config;
   } catch (err) {
-    error(`[config] Ошибка загрузки: ${(err as Error).message}`);
+    error(`[config] Не удалось прочитать config.yaml: ${(err as Error).message}`);
     throw err;
   }
 }

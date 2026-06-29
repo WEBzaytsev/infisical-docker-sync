@@ -61,12 +61,12 @@ async function findDependentContainers(project: string, targetService: string): 
     }
 
     if (dependents.length > 0) {
-      info(`[docker] ${targetService}: ${dependents.length} зависимых контейнеров`);
+      info(`[docker] ${targetService}: остановим ${dependents.length} зависимых контейнеров перед пересозданием`);
     }
 
     return dependents;
   } catch (err) {
-    warn(`[docker] Ошибка поиска зависимостей: ${(err as Error).message}`);
+    warn(`[docker] Не удалось определить зависимые контейнеры: ${(err as Error).message}`);
     return [];
   }
 }
@@ -151,14 +151,14 @@ async function recreateContainerCore(
           });
           debug(`[docker] ${name}: подключён к ${networkName}`);
         } catch (netErr) {
-          warn(`[docker] ${name}: не удалось подключить к ${networkName}: ${(netErr as Error).message}`);
+          warn(`[docker] ${name}: не удалось подключить к сети ${networkName}: ${(netErr as Error).message}`);
         }
       }
     }
   }
 
   await newContainer.start();
-  info(`[docker] ${name}: пересоздан (${newContainer.id.slice(0, 12)})`);
+  info(`[docker] ${name}: контейнер пересоздан (${newContainer.id.slice(0, 12)})`);
 }
 
 async function recreateViaDockerAPI(
@@ -176,7 +176,7 @@ async function recreateViaDockerAPI(
   });
 
   if (containers.length === 0) {
-    error(`[docker] ${service}: не найден в проекте ${project}`);
+    error(`[docker] ${service}: контейнер не найден в compose-проекте ${project} — проверьте container в config.yaml и container_name в compose приложения`);
     return;
   }
 
@@ -218,9 +218,9 @@ async function recreateViaDockerAPI(
       } else {
         await docker.getContainer(dependent.id).start();
       }
-      info(`[docker] зависимый ${dependent.name}: запущен`);
+      info(`[docker] зависимый ${dependent.name}: запущен после пересоздания`);
     } catch (depErr) {
-      warn(`[docker] зависимый ${dependent.name}: ошибка запуска: ${(depErr as Error).message}`);
+      warn(`[docker] зависимый ${dependent.name}: не удалось запустить: ${(depErr as Error).message}`);
     }
   }
 }
@@ -237,7 +237,7 @@ export async function recreateContainer(
     });
 
     if (containers.length === 0) {
-      error(`[docker] ${containerName}: не найден`);
+      error(`[docker] ${containerName}: контейнер не найден — проверьте container в config.yaml и что контейнер создан через compose`);
       return;
     }
 
@@ -252,7 +252,7 @@ export async function recreateContainer(
       await recreateContainerCore(containerInfo, envVars, removedKeys);
     }
   } catch (err) {
-    error(`[docker] ${containerName}: ошибка пересоздания: ${(err as Error).message}`);
+    error(`[docker] ${containerName}: пересоздание не удалось: ${(err as Error).message}`);
     throw err;
   }
 }

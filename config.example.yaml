@@ -1,5 +1,14 @@
-# Infisical Docker Sync — пример конфигурации
-# Скопируйте в /app/data/config.yaml и заполните значения
+# Infisical Docker Sync — пример config.yaml
+#
+# Путь в контейнере: /app/data/config.yaml
+# При первом запуске агент скопирует этот файл, если config.yaml ещё нет.
+#
+# Порядок настройки:
+#   1. Заполните siteUrl, clientId, clientSecret (Machine Identity в Infisical)
+#   2. Для каждого приложения добавьте блок в services
+#   3. container = container_name в compose приложения
+#   4. envDir = mount point в compose агента (см. docker-compose.example.yml)
+#   5. envFileName = имя файла, обычно .env
 
 siteUrl: https://app.infisical.com
 clientId: your-client-id
@@ -13,8 +22,8 @@ services:
     environment: dev
     envDir: /app/data/envs
     envFileName: .env
-    # syncInterval: 120  # переопределение глобального интервала
-    # overrides:         # переопределение глобальных credentials
+    # syncInterval: 120  # свой интервал для этого сервиса
+    # overrides:         # другие credentials для отдельного проекта
     #   siteUrl: https://custom.infisical.com
     #   clientId: other-client-id
     #   clientSecret: other-client-secret

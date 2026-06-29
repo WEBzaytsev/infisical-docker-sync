@@ -27,7 +27,7 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
     const envVars = await fetchEnv(creds);
 
     if (Object.keys(envVars).length === 0) {
-      warn(`[sync] ${service.container}: пустой ответ`);
+      warn(`[sync] ${service.container}: Infisical вернул пустой список секретов — проверьте projectId и environment в config.yaml`);
       return;
     }
 
@@ -37,7 +37,7 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
     const absDir = path.resolve(service.envDir);
 
     if (!absPath.startsWith(absDir + path.sep) && absPath !== absDir) {
-      throw new Error(`Небезопасный путь: ${absPath} выходит за пределы ${absDir}`);
+      throw new Error(`Небезопасный путь к .env: ${absPath} выходит за пределы envDir (${absDir}). Проверьте envFileName в config.yaml`);
     }
 
     await ensureEnvDir(envPath);
@@ -50,7 +50,7 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
       const written = await fs.stat(envPath);
       debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
       await updateServiceState(service.container, envPath, envText, variableCount);
-      info(`[sync] ${service.container}: записано ${variableCount} vars, пересоздание контейнера`);
+      info(`[sync] ${service.container}: записано ${variableCount} переменных, запрос пересоздания контейнера`);
       await recreateContainer(service.container, envVars, diff.removed);
       const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
       if (changedKeys.length > 0) {
@@ -101,20 +101,20 @@ async function recreateConfig(): Promise<void> {
       setupServiceSync(service, config);
     }
 
-    info(`[config] Перезагружено: ${config.services.length} сервисов`);
+    info(`[config] config.yaml перезагружен: ${config.services.length} сервисов`);
   } catch (err) {
-    error(`[config] Ошибка перезагрузки: ${(err as Error).message}`);
+    error(`[config] Не удалось перезагрузить config.yaml: ${(err as Error).message}`);
   }
 }
 
 async function main(): Promise<void> {
-  info('[config] Запуск Infisical Docker Sync');
+  info('[config] Запуск Infisical Docker Sync — загрузка config.yaml');
 
   const examplePath = '/app/config.example.yaml';
   if (!existsSync(configPath) && existsSync(examplePath)) {
     await fs.copyFile(examplePath, configPath);
     await fs.chmod(configPath, 0o600);
-    info('[config] Создан config.yaml из примера');
+    info('[config] Создан config.yaml из примера — заполните credentials и services, затем перезапустите или сохраните файл');
   }
 
   try {
@@ -122,24 +122,24 @@ async function main(): Promise<void> {
     const config = await loadConfig(configPath);
     setLogLevel(config.logLevel);
 
-    info(`[config] ${config.services.length} сервисов, интервал ${config.syncInterval}с`);
+    info(`[config] Синхронизация: ${config.services.length} сервисов, интервал ${config.syncInterval} с`);
 
     for (const service of config.services) {
       setupServiceSync(service, config);
     }
   } catch (err) {
-    error(`[config] Ошибка загрузки: ${(err as Error).message}`);
+    error(`[config] Не удалось загрузить config.yaml: ${(err as Error).message}`);
   }
 
   try {
     watchConfig(configPath, recreateConfig);
   } catch (err) {
-    warn(`[watch] Не удалось запустить: ${(err as Error).message}`);
+    warn(`[watch] Не удалось включить hot-reload config.yaml: ${(err as Error).message}`);
   }
 }
 
 function handleShutdown(): void {
-  info('[config] Завершение');
+  info('[config] Остановка агента');
   for (const timer of timers.values()) {
     clearInterval(timer);
   }

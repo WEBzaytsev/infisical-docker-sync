@@ -1,10 +1,10 @@
-# Пример развёртывания infisical-docker-sync + recreate-proxy
+# Infisical Docker Sync + recreate-proxy
 #
-# 1. Скопируй:  cp docker-compose.example.yml docker-compose.yml
-# 2. Создай .env (см. README): PROXY_TOKEN, DOCKER_GID
-# 3. Создай ./data/config.yaml (или дождись автогенерации при первом старте)
-# 4. Подставь свои volume — каталоги, где у приложений лежит .env
-# 5. docker compose up -d
+# Шаг 1: cp docker-compose.example.yml docker-compose.yml
+# Шаг 2: создайте .env — PROXY_TOKEN (openssl rand -hex 32), DOCKER_GID (stat -c '%g' /var/run/docker.sock)
+# Шаг 3: mkdir -p data && docker compose up -d
+# Шаг 4: отредактируйте data/config.yaml (создастся из примера при первом старте)
+# Шаг 5: замените volume ниже на каталоги ваших приложений (где лежит .env)
 
 services:
   recreate-proxy:
@@ -29,7 +29,7 @@ services:
     image: ghcr.io/webzaytsev/infisical-docker-sync:latest
     container_name: infisical-docker-sync
     restart: unless-stopped
-    user: "0:0"
+    user: "0:0"   # нужен для записи .env после chown в entrypoint приложения
     environment:
       - PROXY_URL=http://recreate-proxy:8080
       - PROXY_TOKEN=${PROXY_TOKEN}
@@ -40,8 +40,8 @@ services:
       - ${HOME}/projects/my-worker:/projects/my-worker
     depends_on: [recreate-proxy]
     networks:
-      - proxynet
-      - default
+      - proxynet   # связь с proxy
+      - default    # HTTPS к Infisical
 
 networks:
   proxynet:

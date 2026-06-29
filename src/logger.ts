@@ -27,7 +27,7 @@ export function setLogLevel(level?: string): void {
       logger.info(`Уровень логирования: ${normalized}`);
     }
   } else {
-    logger.warn(`Неизвестный уровень логирования: ${level}, используется ${LOG_LEVELS.INFO}`);
+    logger.warn(`Неизвестный logLevel «${level}» в config.yaml — используется ${LOG_LEVELS.INFO}`);
   }
 }
 

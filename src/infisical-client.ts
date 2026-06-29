@@ -75,7 +75,7 @@ export async function fetchEnv({
     debug(`Получено ${Object.keys(output).length} секретов для ${environment}`);
     return output;
   } catch (err) {
-    error(`Ошибка при получении секретов: ${(err as Error).message}`);
+    error(`[infisical] Не удалось получить секреты — проверьте siteUrl, credentials и доступ к проекту: ${(err as Error).message}`);
     throw err;
   }
 }

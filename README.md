@@ -1,58 +1,107 @@
-# 🍺 Infisical Docker Sync
+# Infisical Docker Sync
 
-> *Когда надоело каждый раз руками обновлять .env файлы и перезапускать контейнеры*
+Агент синхронизирует секреты из Infisical в `.env` на диске и пересоздаёт Docker-контейнеры, когда значения меняются. Один образ — два сервиса: агент без доступа к Docker-сокету и sidecar-proxy для пересоздания контейнеров.
 
-Эта штука автоматически тянет секреты из Infisical и пересоздает твои Docker контейнеры когда что-то поменялось. Написано на TypeScript, потому что мы не варвары.
+## Пользовательский путь
 
-## ⚠️ Дисклеймер (прочитай, потом жалуйся)
+```
+Infisical (секреты)
+       │
+       ▼
+  config.yaml ──► агент infisical-docker-sync
+       │              │
+       │              ├─► запись .env в envDir
+       │              └─► POST /recreate ──► recreate-proxy ──► Docker API
+       │
+       ▼
+  docker-compose приложения (env_file: ./.env)
+```
 
-**Это не enterprise-продукт.** Side project, собранный в режиме «надоело руками» и «vibe coding». Работает у автора на проде — но **ты сам отвечаешь за то, куда это ставишь**.
+| Этап | Что делаете | Результат |
+|------|-------------|-----------|
+| 1. Развёртывание | `docker compose up` с агентом и proxy | Оба контейнера работают |
+| 2. Конфигурация | Заполняете `data/config.yaml` | Агент знает, откуда брать секреты и куда писать |
+| 3. Монтирование | Пробрасываете каталоги приложений в compose агента | `envDir` в конфиге совпадает с путём на диске |
+| 4. Приложение | Указываете `container_name` и `env_file` в compose приложения | Контейнер подхватывает `.env` после пересоздания |
+| 5. Эксплуатация | Смотрите логи, при необходимости правите конфиг | Секреты обновляются по интервалу, контейнер пересоздаётся при изменениях |
 
-- **Нет гарантий.** Ни SLA, ни поддержки 24/7, ни «мы протестировали на вашем кластере». MIT лицензия = as is, без обещаний.
-- **Контейнеры пересоздаются.** Не `restart`, а stop → remove → create → start. Даунтайм, зависимые сервисы, volume — всё на твоей совести. **Сначала staging.**
-- **Docker socket = root на хосте.** Да, мы вынесли его в отдельный proxy и режем поверхность — но скомпрометированный proxy всё ещё может снести пол-сервера. Это осознанный trade-off, не «безопасно по умолчанию».
-- **Агент под root (`user: "0:0"`).** Иначе Laravel и прочие `chown`-ят `.env` и sync ломается. Root без шела в distroless, но root на примонтированных каталогах — всё равно root.
-- **Конфиг и монтирования — руками.** Неправильный `envDir`, забытый volume, `internal: true` без второй сети — получишь `fetch failed` и тихий ад. README не заменяет мозг.
-- **Infisical, compose, пути на диске — три разных мира.** Агент не читает твои мысли: `container` в config = `container_name` в compose, `envDir` = mount point в агенте, на хосте = `env_file` приложения. Перепутал — синк в `/app/envs/...` в никуда.
-- **Баги бывают.** Пустой `CACHE_PREFIX`, Joi ругался — уже было. Завтра будет что-то новое. Dependabot крутится, CI зелёный — не значит «в prod можно не смотреть».
-- **Не для regulated / PCI / «аудитор спросит».** Для своих pet-проектов и когда понимаешь, что делаешь.
+## Перед установкой
 
-Если после этого всё ещё хочется — welcome. Если нет — тоже норм, ручной `docker compose up -d` никто не отменял.
+**Кому подходит:** pet-проекты, staging, небольшие prod-среды, где вы контролируете Docker Compose и понимаете последствия пересоздания контейнеров.
 
-## 🚀 Что умеет
+**Кому не подходит:** regulated-среды (PCI, SOC2), кластеры Kubernetes, сценарии с zero-downtime без пересоздания.
 
-- Берет секреты из Infisical через их API
-- Создает .env файлы прямо там где нужно
-- Следит за изменениями и автоматически перезапускает контейнеры через docker-compose *(пересоздаёт, см. дисклеймер)*
-- Старается не падать на кривом конфиге — но prod всё равно проверяй сам
-- Показывает нормальные логи (даже на Windows!)
+### Требования
 
-## 🛠 Что нужно
+- Docker и Docker Compose v2
+- Доступ к `/var/run/docker.sock` на хосте (монтируется **только** в `recreate-proxy`)
+- Machine Identity в Infisical: Client ID и Client Secret с доступом к нужным проектам
+- Файл `.env` рядом с compose агента: `PROXY_TOKEN`, при необходимости `DOCKER_GID`
 
-- Docker + Docker Compose v2 (v1 уже в помойке)
-- Доступ к `/var/run/docker.sock` на хосте (монтируется **только** в `recreate-proxy`, не в агент)
-- Аккаунт в Infisical с Client ID и Client Secret
-- `.env` рядом с compose: `PROXY_TOKEN` и при необходимости `DOCKER_GID`
+### Ограничения и риски
 
-## 🍻 Быстрый старт
+- **Пересоздание, не restart.** При изменении секретов контейнер проходит stop → remove → create → start. Возможен даунтайм; зависимые сервисы останавливаются и запускаются заново.
+- **Docker socket = root на хосте.** Proxy изолирует сокет от агента, но компрометация proxy даёт полный доступ к Docker.
+- **Агент работает от root** (`user: "0:0"`) — иначе приложения с `chown` на `.env` (Laravel и др.) блокируют повторную запись.
+- **Три связанных идентификатора:** `container` в config = `container_name` в compose приложения; `envDir` = mount point внутри агента = каталог с `.env` на хосте.
+- **MIT, as is.** Без SLA и гарантий. Сначала проверяйте на staging.
 
-### 1. Настрой конфиг
+## Быстрый старт
 
-Конфиг живёт в `./data/config.yaml` (volume `/app/data`). При первом запуске агент создаст его из примера, если файла нет.
+### Шаг 1. Разверните агент и proxy
 
-Создай `./data/config.yaml` (или отредактируй после первого старта):
+Скопируйте пример compose и подготовьте каталог данных:
+
+```bash
+cp docker-compose.example.yml docker-compose.yml
+mkdir -p data
+```
+
+Создайте `.env` рядом с compose:
+
+```bash
+PROXY_TOKEN=замените_на_случайную_строку   # openssl rand -hex 32
+DOCKER_GID=999                              # stat -c '%g' /var/run/docker.sock
+```
+
+Запустите:
+
+```bash
+docker compose up -d
+```
+
+При первом старте агент создаст `data/config.yaml` из примера, если файла ещё нет.
+
+**Структура на хосте:**
+
+```
+./
+├── docker-compose.yml
+├── .env                         # PROXY_TOKEN, DOCKER_GID
+├── data/
+│   └── config.yaml              # конфиг агента
+└── ~/projects/
+    ├── my-app/.env              # envDir: /projects/my-app
+    └── my-worker/.env
+```
+
+Готовый compose — в [`docker-compose.example.yml`](docker-compose.example.yml).
+
+### Шаг 2. Настройте config.yaml
+
+Файл: `./data/config.yaml` (внутри контейнера — `/app/data/config.yaml`).
 
 ```yaml
 siteUrl: "https://app.infisical.com"
-clientId: "твой-client-id-из-infisical"
-clientSecret: "твой-secret-не-палить-никому"
-syncInterval: 30  # как часто проверять (секунды)
-logLevel: "info"  # debug если хочешь все подробности
+clientId: "client-id-из-infisical"
+clientSecret: "client-secret-из-infisical"
+syncInterval: 30   # интервал проверки, секунды (минимум 10)
+logLevel: "info"   # debug | info | silent
 
 services:
-  - container: "my-app"
+  - container: "my-app"              # = container_name в compose приложения
     envFileName: ".env"
-    envDir: "/projects/my-app"   # = mount point в compose агента
+    envDir: "/projects/my-app"       # = mount point в compose агента
     projectId: "project-id-из-infisical"
     environment: "prod"
 
@@ -63,188 +112,105 @@ services:
     environment: "prod"
 ```
 
-### 2. Запусти агента
+Полный пример с комментариями — в [`config.example.yaml`](config.example.yaml).
 
-Один образ — два сервиса: агент (без сокета) + встроенный recreate-only proxy (с сокетом).
+### Шаг 3. Смонтируйте каталоги приложений
 
-**Структура на хосте:**
-
-```
-./
-├── docker-compose.yml      # из docker-compose.example.yml
-├── .env                    # PROXY_TOKEN, DOCKER_GID
-├── data/
-│   └── config.yaml         # конфиг агента
-└── ~/projects/
-    ├── my-app/.env           # envDir: /projects/my-app
-    └── my-worker/.env
-```
-
-`envDir` в config.yaml — **путь внутри контейнера агента** (куда смонтирован каталог приложения). На хосте это тот же каталог, что указан в `env_file` compose приложения.
-
-**`.env` рядом с compose:**
-
-```bash
-PROXY_TOKEN=замени_на_случайную_строку   # openssl rand -hex 32
-DOCKER_GID=999                            # stat -c '%g' /var/run/docker.sock
-```
-
-**`docker-compose.yml`** — готовый пример в репозитории: [`docker-compose.example.yml`](docker-compose.example.yml)
-
-```bash
-cp docker-compose.example.yml docker-compose.yml
-docker compose up -d
-```
-
-Минимальный compose (если не хочешь копировать файл):
+В `docker-compose.yml` агента пробросьте те же каталоги, где у приложений лежит `.env`:
 
 ```yaml
 services:
-  recreate-proxy:
-    image: ghcr.io/webzaytsev/infisical-docker-sync:latest
-    container_name: recreate-proxy
-    command: ["dist/proxy/server.js"]
-    restart: unless-stopped
-    environment:
-      - PROXY_TOKEN=${PROXY_TOKEN}
-      - CONTAINER_NAME=recreate-proxy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    group_add:
-      - "${DOCKER_GID:-999}"
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    mem_limit: 128m
-    networks: [proxynet]
-
   infisical-docker-sync:
-    image: ghcr.io/webzaytsev/infisical-docker-sync:latest
-    container_name: infisical-docker-sync
-    restart: unless-stopped
-    user: "0:0"
-    environment:
-      - PROXY_URL=http://recreate-proxy:8080
-      - PROXY_TOKEN=${PROXY_TOKEN}
-      - TZ=Europe/Moscow
     volumes:
       - ./data:/app/data
       - ${HOME}/projects/my-app:/projects/my-app
       - ${HOME}/projects/my-worker:/projects/my-worker
-    depends_on: [recreate-proxy]
-    networks:
-      - proxynet   # к recreate-proxy
-      - default    # Infisical API (HTTPS)
-
-networks:
-  proxynet:
-    internal: true
 ```
 
-### 3. Настрой свой проект
+`envDir` в config — путь **внутри контейнера агента**. На хосте это тот же каталог, что указан в `env_file` compose приложения.
 
-В твоем основном `docker-compose.yml`:
+**Альтернатива:** общий каталог `./envs:/app/envs` и `envDir: "/app/envs/my-app"`, если не хотите монтировать весь проект.
+
+### Шаг 4. Настройте compose приложения
+
+В compose вашего приложения укажите имя контейнера и файл окружения:
 
 ```yaml
 services:
   my-app:
     container_name: my-app
     image: my-app:latest
-    env_file: ./.env  # агент создаст этот файл
-    
+    env_file: ./.env    # агент создаст и обновит этот файл
+
   my-db:
     container_name: my-db
     image: postgres:15
-    env_file: ./.env  # или отдельный файл если нужно
+    env_file: ./.env
 ```
 
-## 🎯 Как это работает
-
-1. **Агент стартует** и читает конфиг
-2. **Подключается к Infisical** и тянет секреты
-3. **Создает .env файлы** в указанных папках
-4. **Следит за изменениями** в Infisical каждые N секунд
-5. **Когда что-то поменялось** — обновляет `.env` и просит `recreate-proxy` пересоздать контейнер через Docker API (spec берётся из существующего контейнера, из запроса — только env)
-
-### Магия с путями
-
-Агент умный - он читает метаданные твоих контейнеров и понимает:
-- Где лежит `docker-compose.yml` 
-- В какой папке запускать команды
-- Какие файлы конфигурации использовать
-
-Поэтому просто монтируй папки правильно и все заработает.
-
-## 🔧 Монтирование путей
-
-Монтируй **каталоги приложений**, где лежит `.env` — те же, что видит `env_file` в compose приложения:
-
-```yaml
-# docker-compose.yml агента
-volumes:
-  - ./data:/app/data
-  - ${HOME}/projects/my-app:/projects/my-app
-  - ${HOME}/projects/my-worker:/projects/my-worker
-
-# config.yaml — envDir = mount point внутри агента
-services:
-  - container: "my-app"
-    envDir: "/projects/my-app"
-    envFileName: ".env"
-  - container: "my-worker"
-    envDir: "/projects/my-worker"
-    envFileName: ".env"
-```
-
-```yaml
-# docker-compose.yml приложения (отдельный проект)
-services:
-  my-app:
-    container_name: my-app
-    env_file: ./.env   # ~/projects/my-app/.env на хосте
-```
-
-Агент пишет `/projects/my-app/.env` → на хосте `${HOME}/projects/my-app/.env` → приложение подхватывает после recreate.
-
-**Альтернатива:** общая папка `./envs:/app/envs` и `envDir: "/app/envs/my-app"` — если не хочешь монтировать весь каталог проекта.
-
-## 📊 Мониторинг
+### Шаг 5. Проверьте работу
 
 ```bash
-# Смотри что происходит
+# Логи агента — синхронизация секретов и запись .env
 docker logs -f infisical-docker-sync
+
+# Логи proxy — пересоздание контейнеров
 docker logs -f recreate-proxy
 
-# Проверь что живы
+# Статус сервисов
 docker ps | grep -E 'infisical-docker-sync|recreate-proxy'
-
-# Если что-то сломалось
-docker logs infisical-docker-sync --tail 100
-docker logs recreate-proxy --tail 100
 ```
 
-## 🐛 Когда все сломалось
+**Ожидаемые сообщения при успешном цикле:**
 
-### "Container not found"
-- Проверь что имя контейнера в конфиге совпадает с реальным
-- Убедись что контейнер создан через docker-compose (агент работает только с ними)
-
-### "env file not found"
-Агент скажет что именно не так и как исправить:
 ```
-[CONFIG ERROR] 🔧 Что нужно исправить:
-[CONFIG ERROR] 1. Откройте файл: /home/user/project/docker-compose.yml
-[CONFIG ERROR] 2. Найдите секцию сервиса my-app
-[CONFIG ERROR] 3. Измените env_file с:
-[CONFIG ERROR]    БЫЛО: env_file: /old/wrong/path/.env
-[CONFIG ERROR]    СТАЛО: env_file: ./.env
+[config] Загружено: 2 сервисов из /app/data/config.yaml
+[sync] my-app: .env не найден — создаём из секретов Infisical
+[sync] my-app: записано 42 переменных, запрос пересоздания контейнера
+[docker] my-app: пересоздан (a1b2c3d4e5f6)
+[proxy] proxy для пересоздания слушает порт 8080
 ```
 
-### `fetch failed` при синхронизации с Infisical
+При повторных проверках без изменений:
 
-Агент не достучался до `siteUrl` из `config.yaml`. Частая причина после перехода на двухсервисный compose: агент **только** в `proxynet` с `internal: true` — интернета там нет.
+```
+[sync] my-app: секреты актуальны (42 переменных), пересоздание не требуется
+```
 
-**Решение:** proxy остаётся только в `proxynet`, агент — в `proxynet` + `default`:
+## Как это работает
+
+1. Агент читает `config.yaml` и по интервалу опрашивает Infisical API.
+2. Сравнивает секреты с текущим `.env` на диске.
+3. При отличиях записывает `.env` (права `0600`) и отправляет proxy запрос `POST /recreate`.
+4. Proxy читает spec контейнера через `inspect`, подставляет новые переменные окружения и пересоздаёт контейнер. Из запроса принимаются только имя контейнера и env — изменить `Privileged`, `Binds` или образ нельзя.
+5. Зависимые контейнеры в том же compose-проекте временно останавливаются и запускаются после пересоздания целевого.
+
+Агент определяет compose-проект по меткам контейнера (`com.docker.compose.project`, `com.docker.compose.service`).
+
+## Устранение неполадок
+
+Каждый раздел привязан к этапу настройки.
+
+### Контейнер не найден
+
+**Сообщение в логах:** `[docker] my-app: контейнер не найден` или `не найден в проекте my-project`
+
+**На каком этапе:** шаг 4 — compose приложения.
+
+**Что проверить:**
+
+1. `container` в `config.yaml` совпадает с `container_name` в compose приложения (не с именем сервиса).
+2. Контейнер уже создан и хотя бы раз запускался через Docker Compose.
+3. Имя уникально на хосте: `docker ps -a --filter name=my-app`.
+
+### Infisical не отвечает (`fetch failed`)
+
+**На каком этапе:** шаг 2 — credentials и сеть.
+
+**Что проверить:**
+
+1. `siteUrl`, `clientId`, `clientSecret`, `projectId`, `environment` в config.
+2. Сеть агента: proxy только в `proxynet` (`internal: true`), агент — в `proxynet` **и** `default` для HTTPS к Infisical:
 
 ```yaml
   infisical-docker-sync:
@@ -253,23 +219,44 @@ docker logs recreate-proxy --tail 100
       - default
 ```
 
-Проверка:
+Проверка доступа:
 
 ```bash
 docker exec infisical-docker-sync node -e "fetch('https://app.infisical.com').then(r=>console.log(r.status)).catch(e=>console.error(e.message))"
 ```
 
-### "Permission denied" / `connect EACCES /var/run/docker.sock`
+### Нет прав на запись `.env`
 
-Сокет монтируется **только** в `recreate-proxy`. На агенте его быть не должно.
+**Сообщение:** `Нет прав на запись в envDir (...)` или `EACCES: permission denied`
 
-**1. Узнай GID группы docker на хосте:**
+**На каком этапе:** шаг 3 — монтирование.
+
+**Что проверить:**
+
+1. Volume смонтирован в compose агента и путь совпадает с `envDir`.
+2. Агент запущен с `user: "0:0"` (см. [`docker-compose.example.yml`](docker-compose.example.yml)).
+3. Каталог на хосте существует и доступен для записи.
+
+### Proxy не стартует (`PROXY_TOKEN не задан`)
+
+**На каком этапе:** шаг 1 — `.env` рядом с compose.
+
+Задайте `PROXY_TOKEN` в `.env` и убедитесь, что переменная проброшена в оба сервиса. Proxy и агент должны использовать одно значение.
+
+### Ошибка доступа к Docker socket (`EACCES`)
+
+**На каком этапе:** шаг 1 — настройка proxy.
+
+Сокет монтируется **только** в `recreate-proxy`.
+
+1. Узнайте GID группы docker:
+
 ```bash
 stat -c '%g' /var/run/docker.sock
-# обычно 999 или 998
 ```
 
-**2. Добавь `group_add` сервису `recreate-proxy`:**
+2. Укажите в `.env` и compose:
+
 ```yaml
 services:
   recreate-proxy:
@@ -277,49 +264,39 @@ services:
       - "${DOCKER_GID:-999}"
 ```
 
-**3. Проверь логи proxy:**
-```bash
-docker logs recreate-proxy --tail 50
-# должно быть: [proxy] recreate-only proxy слушает :8080
-```
+3. Проверьте логи: `[proxy] proxy для пересоздания слушает порт 8080`.
 
-Если `group_add` не помогает (редко на Docker Desktop), временно для диагностики: `user: "0:0"` на `recreate-proxy`. На Linux prod обычно достаточно `group_add`.
+### Пустой ответ от Infisical
 
-### `EACCES: permission denied` при записи `.env`
+**Сообщение:** `[sync] my-app: Infisical вернул пустой список секретов`
 
-Агент пишет `.env`, затем потребитель (например, Laravel с `www-data` uid 33) делает `chown -R` в своём entrypoint. После этого агент (uid 65532 / nonroot) не может перечитать файл для диффа и перезаписать его.
+**На каком этапе:** шаг 2 — projectId и environment.
 
-**Решение:** запусти агент от root (`user: "0:0"`) — distroless без шела, `/bin/sh` в образе нет, просто root-процесс Node.js:
+Проверьте, что в указанном окружении проекта есть секреты и у Machine Identity есть к ним доступ.
 
-```yaml
-services:
-  infisical-docker-sync:
-    user: "0:0"
-    # cap_drop НЕ ставить — root нужен DAC_OVERRIDE для записи чужих файлов
-```
+### Ошибка валидации config.yaml
 
-`fs.writeFile` сохраняет inode и владельца (33:33 останется 33:33) — потребитель продолжает читать свой файл, агент только обновляет содержимое.
+**Сообщение:** `Ошибка конфигурации: ...`
 
-> Сокета у агента нет (он у `recreate-proxy`), поэтому root здесь ограничен только примонтированными `./data` и каталогами приложений.
+**На каком этапе:** шаг 2.
 
-### Логи выглядят как иероглифы
-Не должно быть - агент автоматически настраивает кодировку. Если все равно проблемы, попробуй другой терминал.
+Типичные причины: пропущено обязательное поле, `syncInterval` меньше 10, в `envFileName` указан путь вместо имени файла.
 
-## 🔒 Безопасность
+После исправления config перезагружается автоматически (hot-reload). В логах: `[watch] config.yaml изменён, перезагружаем`.
 
-- **Не коммить config.yaml** с секретами в git
-- **Ограничь права** Client ID в Infisical только нужными проектами  
-- **Защити папку** с .env файлами от посторонних глаз
-- **Используй конкретные теги** образов в проде, а не `latest`
+## Безопасность
 
-### ⚠️ Архитектура безопасности
+### Рекомендации
 
-**Прямой доступ к `/var/run/docker.sock` = root доступ ко всей машине.**
+- Не коммитьте `config.yaml` с секретами в git.
+- Ограничьте права Machine Identity в Infisical только нужными проектами.
+- Защитите каталоги с `.env` на хосте (права файлов, доступ к серверу).
+- В prod используйте фиксированный тег образа, не `latest`.
 
-Образ содержит встроенный recreate-only proxy. Агент ходит к нему по TCP и **не монтирует** сокет.
+### Архитектура
 
 ```
-infisical-docker-sync (root, БЕЗ сокета)
+infisical-docker-sync (root, без сокета)
     │  POST /recreate {container, env}  +  x-proxy-token
     ▼
 recreate-proxy (nonroot 65532, сокет :ro)
@@ -328,52 +305,39 @@ recreate-proxy (nonroot 65532, сокет :ro)
 /var/run/docker.sock
 ```
 
-Ключевая гарантия: proxy читает spec контейнера из сокета (`inspect`), из запроса — только имя и env. Задать `Privileged`, `Binds` или образ через запрос невозможно.
-
-Полный `docker-compose.yml` — в разделе [Быстрый старт](#-быстрый-старт).
-
-**Hardening proxy:** `cap_drop: [ALL]`, `no-new-privileges`, `proxynet` с `internal: true` (proxy без выхода в интернет, порт на хост не публикуется). Агент дополнительно в `default` — только для HTTPS к Infisical.
+**Hardening proxy:** `cap_drop: [ALL]`, `no-new-privileges`, сеть `proxynet` с `internal: true` (proxy без выхода в интернет, порт на хост не публикуется).
 
 **Остаточные риски:**
-- Скомпрометированный агент может подменить env и дёргать recreate (DoS). До Docker API не дотянется.
-- Скомпрометированный proxy = root на хосте; поверхность — один `POST /recreate`, без шела в образе.
 
-**Почему не Tecnativa/wollomatic:** фильтруют только endpoint/метод, не тело запроса — `POST /containers/create` пропускает `Privileged`/`Binds: ["/:/host"]`. Наш proxy не принимает `HostConfig` вообще.
+- Скомпрометированный агент может подменить env и вызвать пересоздание (DoS). До Docker API доступа нет.
+- Скомпрометированный proxy = root на хосте; поверхность атаки — один endpoint `POST /recreate`.
+
+**Почему не generic Docker proxy:** фильтры по endpoint/методу не проверяют тело запроса — `POST /containers/create` может передать `Privileged` или `Binds: ["/:/host"]`. Наш proxy не принимает `HostConfig` из запроса.
 
 ### Переменные окружения
 
-| Переменная | Сервис | Описание |
-|------------|--------|----------|
-| `PROXY_TOKEN` | оба | Общий секрет для `POST /recreate`. Обязателен; proxy без него не стартует |
+| Переменная | Сервис | Назначение |
+|------------|--------|------------|
+| `PROXY_TOKEN` | оба | Общий секрет для `POST /recreate`. Обязателен |
 | `PROXY_URL` | агент | URL proxy. По умолчанию `http://recreate-proxy:8080` |
-| `PROXY_PORT` | proxy | Порт HTTP-сервера proxy. По умолчанию `8080` |
-| `CONFIG_PATH` | агент | Путь к конфигу. По умолчанию `/app/data/config.yaml` |
-| `CONTAINER_NAME` | оба | Префикс в логах. Для proxy: `recreate-proxy` |
-| `DOCKER_GID` | proxy (compose) | GID группы docker для `group_add` |
+| `PROXY_PORT` | proxy | Порт HTTP-сервера. По умолчанию `8080` |
+| `CONFIG_PATH` | агент | Путь к config. По умолчанию `/app/data/config.yaml` |
+| `CONTAINER_NAME` | оба | Префикс в логах |
+| `DOCKER_GID` | proxy | GID группы docker для `group_add` |
 
-## 🍕 Для разработчиков
+## Для разработчиков
 
 ```bash
-# Поставь зависимости
 pnpm install
-
-# Запусти в dev режиме
 pnpm dev
-
-# Собери
 pnpm build
-
-# Проверь код (строго!)
 pnpm check
-
-# Собери Docker-образ локально (Dockerfile в корне репозитория)
-docker build -t infisical-docker-sync:local .
-
-# Исправь что можно автоматически
 pnpm lint:fix
+
+docker build -t infisical-docker-sync:local .
 ```
 
-Локальный smoke proxy (Linux, нужен `group_add` или `user: "0:0"` для доступа к сокету):
+Локальный запуск proxy (Linux, нужен `group_add` или `user: "0:0"`):
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -394,31 +358,16 @@ src/
 ├── docker-manager.ts     # HTTP-клиент к recreate-proxy
 ├── env-watcher.ts        # Сравнение и запись .env
 ├── config-watcher.ts     # Hot-reload конфига
-├── state-manager.ts      # Персистентное состояние sync
+├── state-manager.ts      # Состояние синхронизации
 ├── logger.ts
 ├── types.ts
 └── proxy/
-    ├── server.ts         # recreate-only HTTP proxy (POST /recreate)
-    └── docker-recreate.ts # dockerode: inspect/stop/remove/create/start
+    ├── server.ts         # HTTP proxy (POST /recreate)
+    └── docker-recreate.ts
 ```
 
-## 🎉 Фичи
+## Лицензия
 
-- **Distroless runtime** — Node.js без shell в образе
-- **Recreate-only proxy** — сокет изолирован, агент не видит Docker API
-- **TypeScript** - потому что `any` это зло
-- **ESLint 9** со строгими правилами - код должен быть красивым
-- **Кастомные пути монтирования** - любые папки в любые места
-- **Умное определение docker-compose** - не нужно указывать пути
-- **Graceful обработка ошибок** - не падает при проблемах с конфигом
-- **Подробные сообщения об ошибках** - говорит что именно сломалось и как починить
+MIT — без гарантий, на ваш риск.
 
-## 📝 Лицензия
-
-MIT — делай что хочешь, только не говори что это ты написал 😄
-
-**Ещё раз:** vibe-coded утилита для ленивых админов, не замена Vault Agent / External Secrets Operator / официальной интеграции Infisical. Используй на свой страх и риск.
-
----
-
-*Сделано с ❤️ и кофеином для автоматизации рутины*
+Утилита для автоматизации синхронизации секретов в Docker Compose. Не замена Vault Agent, External Secrets Operator или официальной интеграции Infisical.

@@ -30,12 +30,12 @@ export async function recreateContainer(
     const result = (await res.json().catch(() => ({}))) as RecreateResponse;
 
     if (!res.ok || !result.ok) {
-      throw new Error(result.error ?? `proxy ответил ${res.status}`);
+      throw new Error(result.error ?? `recreate-proxy ответил с кодом ${res.status}`);
     }
 
     debug(`[docker] ${containerName}: пересоздание выполнено через proxy`);
   } catch (err) {
-    error(`[docker] ${containerName}: ошибка пересоздания: ${(err as Error).message}`);
+    error(`[docker] ${containerName}: пересоздание через proxy не удалось: ${(err as Error).message}`);
     throw err;
   }
 }
