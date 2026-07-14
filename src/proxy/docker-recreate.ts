@@ -161,26 +161,17 @@ async function recreateContainerCore(
   info(`[docker] ${name}: контейнер пересоздан (${newContainer.id.slice(0, 12)})`);
 }
 
+function hasExactContainerName(containerInfo: ContainerInfo, containerName: string): boolean {
+  return (containerInfo.Names || []).some(name => name === `/${containerName}` || name === containerName);
+}
+
 async function recreateViaDockerAPI(
   project: string,
   service: string,
+  containerInfo: ContainerInfo,
   envVars?: EnvVars,
   removedKeys: string[] = [],
 ): Promise<void> {
-  const containers = await docker.listContainers({
-    all: true,
-    filters: {
-      name: [service],
-      label: [`com.docker.compose.project=${project}`],
-    },
-  });
-
-  if (containers.length === 0) {
-    error(`[docker] ${service}: контейнер не найден в compose-проекте ${project} — проверьте container в config.yaml и container_name в compose приложения`);
-    return;
-  }
-
-  const containerInfo = containers[0] as ContainerInfo;
   debug(`[docker] ${service}: найден (${containerInfo.Id.slice(0, 12)})`);
 
   const dependentContainers = await findDependentContainers(project, service);
@@ -236,17 +227,20 @@ export async function recreateContainer(
       filters: { name: [containerName] },
     });
 
-    if (containers.length === 0) {
-      error(`[docker] ${containerName}: контейнер не найден — проверьте container в config.yaml и что контейнер создан через compose`);
-      return;
+    const containerInfo = (containers as ContainerInfo[])
+      .find(container => hasExactContainerName(container, containerName));
+
+    if (!containerInfo) {
+      throw new Error(
+        `[docker] ${containerName}: контейнер не найден — проверьте container в config.yaml и container_name в compose приложения`
+      );
     }
 
-    const containerInfo = containers[0] as ContainerInfo;
     const composeInfo = extractComposeInfo(containerInfo.Labels || {});
 
     if (composeInfo) {
       debug(`[docker] ${containerName}: compose (${composeInfo.project}/${composeInfo.service})`);
-      await recreateViaDockerAPI(composeInfo.project, composeInfo.service, envVars, removedKeys);
+      await recreateViaDockerAPI(composeInfo.project, composeInfo.service, containerInfo, envVars, removedKeys);
     } else {
       debug(`[docker] ${containerName}: standalone`);
       await recreateContainerCore(containerInfo, envVars, removedKeys);
