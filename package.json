@@ -12,8 +12,9 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write \"src/**/*.{ts,js,json,md}\"",
+    "test": "node --import tsx --test test/**/*.test.ts",
     "type-check": "tsc --noEmit",
-    "check": "pnpm run type-check && pnpm run lint && pnpm run build"
+    "check": "pnpm run type-check && pnpm run lint && pnpm run test && pnpm run build"
   },
   "dependencies": {
     "@infisical/sdk": "5.0.2",

@@ -9,6 +9,10 @@
 #   3. container = container_name в compose приложения
 #   4. envDir = mount point в compose агента (см. docker-compose.example.yml)
 #   5. envFileName = имя файла, обычно .env
+#   6. envFileOwner = опциональный uid:gid для atomic rewrite (например 80:80 для Laravel/php-fpm)
+#
+# siteUrl должен быть https://...; http://... разрешён только для локального Infisical
+# (localhost, 127.0.0.1, ::1).
 
 siteUrl: https://app.infisical.com
 clientId: your-client-id
@@ -22,6 +26,7 @@ services:
     environment: dev
     envDir: /app/data/envs
     envFileName: .env
+    # envFileOwner: "80:80"  # опционально: сохранить owner файла для Laravel/php-fpm
     # syncInterval: 120  # свой интервал для этого сервиса
     # overrides:         # другие credentials для отдельного проекта
     #   siteUrl: https://custom.infisical.com

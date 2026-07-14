@@ -95,6 +95,67 @@ export async function updateServiceState(
   }
 }
 
+interface FileOwner {
+  uid: number;
+  gid: number;
+}
+
+function parseEnvFileOwner(owner?: string): FileOwner | undefined {
+  if (!owner) return undefined;
+  const [uid, gid] = owner.split(':').map(Number);
+  if (!Number.isInteger(uid) || !Number.isInteger(gid)) {
+    throw new Error(`Некорректный envFileOwner «${owner}», ожидается uid:gid`);
+  }
+  return { uid, gid };
+}
+
+async function getExistingEnvFileOwner(filePath: string): Promise<FileOwner | undefined> {
+  try {
+    const stat = await fs.lstat(filePath);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Отказ от записи в ${filePath}: целевой .env — символическая ссылка`);
+    }
+    if (!stat.isFile()) {
+      throw new Error(`Отказ от записи в ${filePath}: целевой путь не является обычным файлом`);
+    }
+    return { uid: stat.uid, gid: stat.gid };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+}
+
+async function chownIfRoot(filePath: string, owner?: FileOwner): Promise<void> {
+  if (!owner || process.getuid?.() !== 0) return;
+  await fs.chown(filePath, owner.uid, owner.gid);
+}
+
+export async function writeEnvFileSafely(
+  serviceName: string,
+  filePath: string,
+  content: string,
+  configuredOwner?: string
+): Promise<void> {
+  const dir = path.dirname(filePath);
+  const existingOwner = await getExistingEnvFileOwner(filePath);
+  const owner = parseEnvFileOwner(configuredOwner) || existingOwner;
+  const tmpPath = path.join(
+    dir,
+    `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`
+  );
+
+  try {
+    await fs.writeFile(tmpPath, content, { mode: 0o600, flag: 'wx' });
+    await fs.chmod(tmpPath, 0o600);
+    await chownIfRoot(tmpPath, owner);
+    await fs.rename(tmpPath, filePath);
+    debug(`[sync] ${serviceName}: env записан атомарно → ${filePath}`);
+  } catch (err) {
+    await fs.rm(tmpPath, { force: true }).catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function ensureEnvDir(filePath: string): Promise<void> {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true });

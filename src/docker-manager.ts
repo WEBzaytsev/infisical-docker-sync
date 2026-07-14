@@ -1,7 +1,42 @@
 import { error, debug } from './logger.js';
 import { EnvVars, RecreateRequest, RecreateResponse } from './types.js';
 
-const PROXY_URL = process.env.PROXY_URL || 'http://recreate-proxy:8080';
+const DEFAULT_PROXY_URL = 'http://recreate-proxy:8080';
+const DEFAULT_ALLOWED_PROXY_HOSTS = ['recreate-proxy', 'localhost', '127.0.0.1', '::1'];
+
+function allowedProxyHosts(): string[] {
+  return (process.env.PROXY_ALLOWED_HOSTS || DEFAULT_ALLOWED_PROXY_HOSTS.join(','))
+    .split(',')
+    .map(host => host.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === 'localhost' ||
+    normalized === '::1' ||
+    normalized === '[::1]' ||
+    normalized.startsWith('127.');
+}
+
+export function validateProxyUrl(rawUrl: string, allowedHosts = allowedProxyHosts()): string {
+  const url = new URL(rawUrl);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('PROXY_URL должен использовать http или https');
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  const allowed = new Set(allowedHosts.map(host => host.toLowerCase()));
+  if (!allowed.has(hostname) && !isLoopbackHostname(hostname)) {
+    throw new Error(
+      `PROXY_URL host ${hostname} не входит в список разрешённых внутренних hosts (${[...allowed].join(', ')})`
+    );
+  }
+
+  return url.toString().replace(/\/$/, '');
+}
+
+const PROXY_URL = validateProxyUrl(process.env.PROXY_URL || DEFAULT_PROXY_URL);
 const PROXY_TOKEN = process.env.PROXY_TOKEN || '';
 const REQUEST_TIMEOUT_MS = 60_000;
 
