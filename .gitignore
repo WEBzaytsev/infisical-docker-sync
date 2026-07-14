@@ -1,3 +1,14 @@
 node_modules
+
 dist
+
+# Local runtime config and state
 config.yaml
+data/
+envs/
+
+# Local environment files may contain PROXY_TOKEN and Infisical credentials
+.env
+*.env
+!.env.example
+!*.env.example
