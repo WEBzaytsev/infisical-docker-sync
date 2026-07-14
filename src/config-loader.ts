@@ -22,6 +22,7 @@ const schema = Joi.object({
         .invalid('..', '.')
         .required(),
       envDir: Joi.string().required(),
+      envFileOwner: Joi.string().pattern(/^\d+:\d+$/, 'uid:gid').optional(),
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
       syncInterval: Joi.number().integer().min(10),
@@ -33,6 +34,33 @@ const schema = Joi.object({
     })
   ).min(1).required(),
 });
+
+function isLocalHttpUrl(value: string): boolean {
+  const url = new URL(value);
+  const hostname = url.hostname.toLowerCase();
+  return url.protocol === 'http:' && (
+    hostname === 'localhost' ||
+    hostname === '::1' ||
+    hostname === '[::1]' ||
+    hostname.startsWith('127.')
+  );
+}
+
+function assertSafeInfisicalUrl(value: string): void {
+  const url = new URL(value);
+  if (url.protocol === 'https:' || isLocalHttpUrl(value)) return;
+
+  throw new Error('http разрешён только для локального Infisical (localhost/127.0.0.1/::1); для остальных siteUrl используйте https');
+}
+
+function assertSafeInfisicalUrls(config: Config): void {
+  assertSafeInfisicalUrl(config.siteUrl);
+  for (const service of config.services) {
+    if (service.overrides?.siteUrl) {
+      assertSafeInfisicalUrl(service.overrides.siteUrl);
+    }
+  }
+}
 
 export async function loadConfig(configPath: string): Promise<Config> {
   try {
@@ -59,8 +87,11 @@ export async function loadConfig(configPath: string): Promise<Config> {
       throw new Error(`Ошибка конфигурации: ${validationError.message}`);
     }
 
-    info(`[config] config.yaml загружен: ${value.services.length} сервисов (${absolutePath})`);
-    return value as Config;
+    const config = value as Config;
+    assertSafeInfisicalUrls(config);
+
+    info(`[config] config.yaml загружен: ${config.services.length} сервисов (${absolutePath})`);
+    return config;
   } catch (err) {
     error(`[config] Не удалось прочитать config.yaml: ${(err as Error).message}`);
     throw err;

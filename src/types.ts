@@ -8,6 +8,7 @@ export interface ServiceConfig {
   container: string;
   envFileName: string;
   envDir: string; // Директория где создавать env файл (монтированная в хост)
+  envFileOwner?: string; // uid:gid для atomic rewrite, например "80:80"
   projectId: string;
   environment: string;
   syncInterval?: number;

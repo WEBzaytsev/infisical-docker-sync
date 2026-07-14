@@ -1,7 +1,7 @@
 import { loadConfig } from './config-loader.js';
 import { fetchEnv } from './infisical-client.js';
 import { envToDotenvFormat } from './env-format.js';
-import { hasChanged, ensureEnvDir, updateServiceState } from './env-watcher.js';
+import { hasChanged, ensureEnvDir, updateServiceState, writeEnvFileSafely } from './env-watcher.js';
 import { recreateContainer } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
 import { setLogLevel, info, debug, error, warn } from './logger.js';
@@ -45,8 +45,7 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
 
     if (diff.hasDiff) {
       const envText = envToDotenvFormat(envVars);
-      await fs.writeFile(envPath, envText, { mode: 0o600 });
-      await fs.chmod(envPath, 0o600);
+      await writeEnvFileSafely(service.container, envPath, envText, service.envFileOwner);
       const written = await fs.stat(envPath);
       debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
       await updateServiceState(service.container, envPath, envText, variableCount);

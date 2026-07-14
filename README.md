@@ -60,7 +60,7 @@ mkdir -p data
 Создайте `.env` рядом с compose:
 
 ```bash
-PROXY_TOKEN=замените_на_случайную_строку   # openssl rand -hex 32
+PROXY_TOKEN=<вывод openssl rand -hex 32>  # минимум 32 символа, лучше 64 hex
 DOCKER_GID=999                              # stat -c '%g' /var/run/docker.sock
 ```
 
@@ -102,6 +102,7 @@ services:
   - container: "my-app"              # = container_name в compose приложения
     envFileName: ".env"
     envDir: "/projects/my-app"       # = mount point в compose агента
+    envFileOwner: "80:80"             # опционально: сохранить owner для Laravel/php-fpm и похожих случаев
     projectId: "project-id-из-infisical"
     environment: "prod"
 
@@ -133,7 +134,7 @@ services:
 
 ### Шаг 4. Настройте compose приложения
 
-В compose вашего приложения укажите имя контейнера и файл окружения:
+В compose вашего приложения укажите имя контейнера, файл окружения и opt-in label для безопасного пересоздания через proxy:
 
 ```yaml
 services:
@@ -141,12 +142,18 @@ services:
     container_name: my-app
     image: my-app:latest
     env_file: ./.env    # агент создаст и обновит этот файл
+    labels:
+      infisical-docker-sync.enabled: "true"
 
   my-db:
     container_name: my-db
     image: postgres:15
     env_file: ./.env
+    labels:
+      infisical-docker-sync.enabled: "true"
 ```
+
+Proxy откажется пересоздавать контейнер без label `infisical-docker-sync.enabled=true`. Это защита на случай утечки `PROXY_TOKEN`: token сам по себе не даёт управлять любым контейнером на Docker-хосте.
 
 ### Шаг 5. Проверьте работу
 
@@ -288,6 +295,7 @@ services:
 
 ### Рекомендации
 
+- `siteUrl` должен быть `https://...`. `http://...` разрешён только для локального Infisical (`localhost`, `127.0.0.1`, `::1`).
 - Не коммитьте `config.yaml` с секретами в git.
 - Ограничьте права Machine Identity в Infisical только нужными проектами.
 - Защитите каталоги с `.env` на хосте (права файлов, доступ к серверу).
@@ -305,7 +313,7 @@ recreate-proxy (nonroot 65532, сокет :ro)
 /var/run/docker.sock
 ```
 
-**Hardening proxy:** `cap_drop: [ALL]`, `no-new-privileges`, сеть `proxynet` с `internal: true` (proxy без выхода в интернет, порт на хост не публикуется).
+**Hardening proxy:** `cap_drop: [ALL]`, `no-new-privileges`, сеть `proxynet` с `internal: true` (proxy без выхода в интернет, порт на хост не публикуется), обязательный сильный `PROXY_TOKEN`, exact-match имени контейнера и opt-in label `infisical-docker-sync.enabled=true` на каждом управляемом контейнере.
 
 **Остаточные риски:**
 
@@ -318,8 +326,9 @@ recreate-proxy (nonroot 65532, сокет :ro)
 
 | Переменная | Сервис | Назначение |
 |------------|--------|------------|
-| `PROXY_TOKEN` | оба | Общий секрет для `POST /recreate`. Обязателен |
-| `PROXY_URL` | агент | URL proxy. По умолчанию `http://recreate-proxy:8080` |
+| `PROXY_TOKEN` | оба | Общий секрет для `POST /recreate`. Обязателен, минимум 32 символа; рекомендуется `openssl rand -hex 32` |
+| `PROXY_URL` | агент | URL proxy. По умолчанию `http://recreate-proxy:8080`; host должен быть внутренним и входить в allowlist |
+| `PROXY_ALLOWED_HOSTS` | агент | Разрешённые hosts для `PROXY_URL`. По умолчанию `recreate-proxy,localhost,127.0.0.1,::1` |
 | `PROXY_PORT` | proxy | Порт HTTP-сервера. По умолчанию `8080` |
 | `CONFIG_PATH` | агент | Путь к config. По умолчанию `/app/data/config.yaml` |
 | `CONTAINER_NAME` | оба | Префикс в логах |
@@ -341,7 +350,7 @@ docker build -t infisical-docker-sync:local .
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -e PROXY_TOKEN=test \
+  -e PROXY_TOKEN="$(openssl rand -hex 32)" \
   -e CONTAINER_NAME=recreate-proxy \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   --group-add "$(stat -c '%g' /var/run/docker.sock)" \

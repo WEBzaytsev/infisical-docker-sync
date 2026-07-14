@@ -1,20 +1,20 @@
 import http from 'node:http';
-import { Buffer } from 'node:buffer';
-import { timingSafeEqual } from 'node:crypto';
 import Joi from 'joi';
 import { recreateContainer } from './docker-recreate.js';
+import { tokenValid, validateProxyToken } from './security.js';
 import { info, error } from '../logger.js';
 import { RecreateRequest } from '../types.js';
 
 const PORT = Number(process.env.PROXY_PORT) || 8080;
-const TOKEN = process.env.PROXY_TOKEN;
-const MAX_BODY = 1024 * 1024; // 1 МБ — защита от unbounded body
-
-if (!TOKEN) {
-  error('[proxy] PROXY_TOKEN не задан — задайте переменную в .env и перезапустите recreate-proxy');
+let TOKEN = '';
+try {
+  TOKEN = validateProxyToken(process.env.PROXY_TOKEN);
+} catch (err) {
+  error(`[proxy] ${(err as Error).message}`);
   // eslint-disable-next-line no-process-exit
   process.exit(1);
 }
+const MAX_BODY = 1024 * 1024; // 1 МБ — защита от unbounded body
 
 const schema = Joi.object({
   container: Joi.string()
@@ -27,13 +27,6 @@ const schema = Joi.object({
 
 function headerToken(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? undefined : raw;
-}
-
-function tokenValid(provided: string | undefined): boolean {
-  if (!provided) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(TOKEN as string);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -60,7 +53,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 }
 
 async function handleRecreate(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  if (!tokenValid(headerToken(req.headers['x-proxy-token']))) {
+  if (!tokenValid(TOKEN, headerToken(req.headers['x-proxy-token']))) {
     sendJson(res, 401, { ok: false, error: 'неверный или отсутствующий x-proxy-token' });
     return;
   }

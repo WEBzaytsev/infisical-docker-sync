@@ -3,6 +3,12 @@ import { info, error, warn, debug } from '../logger.js';
 import { EnvVars } from '../types.js';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+const MANAGED_LABEL = 'infisical-docker-sync.enabled';
+const SELF_CONTAINER_NAMES = new Set([
+  process.env.CONTAINER_NAME || 'recreate-proxy',
+  'recreate-proxy',
+  'infisical-docker-sync',
+]);
 
 interface ContainerInfo {
   Id: string;
@@ -165,6 +171,18 @@ function hasExactContainerName(containerInfo: ContainerInfo, containerName: stri
   return (containerInfo.Names || []).some(name => name === `/${containerName}` || name === containerName);
 }
 
+function assertContainerAllowed(containerInfo: ContainerInfo, containerName: string): void {
+  if (SELF_CONTAINER_NAMES.has(containerName)) {
+    throw new Error(`[docker] ${containerName}: proxy не пересоздаёт собственные служебные контейнеры`);
+  }
+
+  if (containerInfo.Labels?.[MANAGED_LABEL] !== 'true') {
+    throw new Error(
+      `[docker] ${containerName}: контейнер должен иметь label ${MANAGED_LABEL}=true для пересоздания через proxy`
+    );
+  }
+}
+
 async function recreateViaDockerAPI(
   project: string,
   service: string,
@@ -237,6 +255,7 @@ export async function recreateContainer(
     }
 
     const composeInfo = extractComposeInfo(containerInfo.Labels || {});
+    assertContainerAllowed(containerInfo, containerName);
 
     if (composeInfo) {
       debug(`[docker] ${containerName}: compose (${composeInfo.project}/${composeInfo.service})`);
