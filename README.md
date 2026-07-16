@@ -322,6 +322,21 @@ recreate-proxy (nonroot 65532, сокет :ro)
 
 **Почему не generic Docker proxy:** фильтры по endpoint/методу не проверяют тело запроса — `POST /containers/create` может передать `Privileged` или `Binds: ["/:/host"]`. Наш proxy не принимает `HostConfig` из запроса.
 
+### Коды ответов recreate-proxy
+
+Все ответы proxy возвращаются в JSON-формате `{ ok, code, error? }`, где `code` — стабильный машинный код результата.
+
+| HTTP | `code` | Когда возвращается |
+|------|--------|--------------------|
+| `200` | `ok` | Контейнер успешно пересоздан |
+| `400` | `invalid_json` / `request_body_read_failed` | Тело запроса нельзя разобрать как JSON или прочитать |
+| `401` | `unauthorized` | Нет `x-proxy-token` или токен неверный |
+| `404` | `route_not_found` | Запрошен endpoint не `/recreate` |
+| `405` | `method_not_allowed` | `/recreate` вызван не через `POST`; ответ содержит `Allow: POST` |
+| `413` | `payload_too_large` | Тело запроса больше 1 МБ |
+| `422` | `validation_failed` | JSON валиден, но payload не соответствует схеме |
+| `500` | `recreate_failed` / `internal_error` | Ошибка Docker-пересоздания или внутренняя ошибка proxy |
+
 ### Переменные окружения
 
 | Переменная | Сервис | Назначение |

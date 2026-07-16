@@ -75,5 +75,6 @@ export interface RecreateRequest {
 
 export interface RecreateResponse {
   ok: boolean;
+  code?: string;
   error?: string;
 }
