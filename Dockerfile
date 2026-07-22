@@ -15,6 +15,10 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN pnpm run build
 
+# distroless/nodejs already runs `node`; this tiny alias lets Compose use
+# `command: proxy` instead of leaking the internal dist path.
+RUN printf "import('./dist/proxy/server.js').then(({ startProxyServer }) => startProxyServer()).catch((err) => { console.error(err); process.exit(1); });\n" > /app/proxy && chmod 0555 /app/proxy
+
 # Оставляем только prod-зависимости для копирования в runtime
 RUN --mount=type=cache,target=/pnpm/store pnpm prune --prod
 
@@ -30,6 +34,7 @@ WORKDIR /app
 # M4: копируем только prod node_modules из builder — pnpm/corepack в runtime не нужны
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/proxy ./proxy
 
 # Директория для данных агента (конфиг + состояние), создана в builder с uid 65532
 COPY --from=builder --chown=65532:65532 /app/data ./data

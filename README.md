@@ -369,7 +369,7 @@ docker run --rm -p 8080:8080 \
   -e CONTAINER_NAME=recreate-proxy \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   --group-add "$(stat -c '%g' /var/run/docker.sock)" \
-  infisical-docker-sync:local dist/proxy/server.js
+  infisical-docker-sync:local proxy
 ```
 
 ### Структура проекта

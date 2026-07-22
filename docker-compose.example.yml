@@ -10,7 +10,7 @@ services:
   recreate-proxy:
     image: ghcr.io/webzaytsev/infisical-docker-sync:latest
     container_name: recreate-proxy
-    command: ["dist/proxy/server.js"]
+    command: proxy
     restart: unless-stopped
     environment:
       - PROXY_TOKEN=${PROXY_TOKEN}
