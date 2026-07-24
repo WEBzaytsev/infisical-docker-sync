@@ -1,20 +1,78 @@
 import { loadConfig } from './config-loader.js';
 import { fetchEnv } from './infisical-client.js';
 import { envToDotenvFormat } from './env-format.js';
-import { hasChanged, ensureEnvDir, updateServiceState, writeEnvFileSafely } from './env-watcher.js';
+import { hasChanged, ensureEnvDir, writeEnvFileSafely } from './env-watcher.js';
 import { recreateContainer } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
 import { setLogLevel, info, debug, error, warn } from './logger.js';
-import { stateManager } from './state-manager.js';
+import { stateManager, StateManager } from './state-manager.js';
 
 import fs from 'fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'path';
-import { Config, ServiceConfig, InfisicalCredentials } from './types.js';
+import { pathToFileURL } from 'node:url';
+import { Config, EnvVars, ServiceConfig, InfisicalCredentials } from './types.js';
 
 const timers = new Map<string, NodeJS.Timeout>();
+const syncInFlight = new Map<string, Promise<void>>();
+const stateWritesInFlight = new Set<Promise<void>>();
+let shuttingDown = false;
 
-async function syncService(service: ServiceConfig, globalConfig: Config): Promise<void> {
+export interface SyncDependencies {
+  fetchEnv: (credentials: InfisicalCredentials) => Promise<EnvVars>;
+  recreateContainer: (
+    containerName: string,
+    envVars?: EnvVars,
+    removedKeys?: string[],
+    pullImage?: boolean,
+  ) => Promise<void>;
+  state: Pick<
+    StateManager,
+    'updateServiceState' | 'getPendingRecreate' | 'clearPendingRecreate'
+  >;
+}
+
+const defaultSyncDependencies: SyncDependencies = {
+  fetchEnv,
+  recreateContainer,
+  state: stateManager,
+};
+
+async function persistServiceState(
+  state: SyncDependencies['state'],
+  serviceName: string,
+  envPath: string,
+  envText: string,
+  variableCount: number,
+  removedKeys: string[],
+): Promise<void> {
+  const stateWrite = state.updateServiceState(serviceName, envPath, envText, variableCount, removedKeys);
+  stateWritesInFlight.add(stateWrite);
+  try {
+    await stateWrite;
+  } finally {
+    stateWritesInFlight.delete(stateWrite);
+  }
+}
+
+async function clearPendingRecreate(
+  state: SyncDependencies['state'],
+  serviceName: string,
+): Promise<void> {
+  const stateWrite = state.clearPendingRecreate(serviceName);
+  stateWritesInFlight.add(stateWrite);
+  try {
+    await stateWrite;
+  } finally {
+    stateWritesInFlight.delete(stateWrite);
+  }
+}
+
+async function syncServiceOnce(
+  service: ServiceConfig,
+  globalConfig: Config,
+  dependencies: SyncDependencies = defaultSyncDependencies,
+): Promise<void> {
   try {
     const creds: InfisicalCredentials = {
       siteUrl: service.overrides?.siteUrl || globalConfig.siteUrl,
@@ -24,7 +82,7 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
       projectId: service.projectId,
     };
 
-    const envVars = await fetchEnv(creds);
+    const envVars = await dependencies.fetchEnv(creds);
 
     if (Object.keys(envVars).length === 0) {
       warn(`[sync] ${service.container}: Infisical вернул пустой список секретов — проверьте projectId и environment в config.yaml`);
@@ -42,25 +100,64 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
 
     await ensureEnvDir(envPath);
     const diff = await hasChanged(service.container, envPath, envVars);
+    const pending = dependencies.state.getPendingRecreate(service.container);
+
+    const removedKeys = [...new Set([
+      ...(pending?.removedKeys || []),
+      ...diff.removed,
+    ])].filter(key => !(key in envVars));
 
     if (diff.hasDiff) {
       const envText = envToDotenvFormat(envVars);
+      await persistServiceState(
+        dependencies.state,
+        service.container,
+        envPath,
+        envText,
+        variableCount,
+        removedKeys,
+      );
       await writeEnvFileSafely(service.container, envPath, envText, service.envFileOwner);
       const written = await fs.stat(envPath);
       debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
-      await updateServiceState(service.container, envPath, envText, variableCount);
-      info(`[sync] ${service.container}: записано ${variableCount} переменных, запрос пересоздания контейнера`);
-      await recreateContainer(service.container, envVars, diff.removed, service.pullImage);
-      const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
-      if (changedKeys.length > 0) {
-        debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);
-      }
-    } else {
+    }
+
+    if (!diff.hasDiff && !pending) {
       debug(`[sync] ${service.container}: нет изменений, файл не записан: ${absPath}`);
+      return;
+    }
+
+    info(`[sync] ${service.container}: ${diff.hasDiff ? `записано ${variableCount} переменных` : 'повторяем неудавшееся пересоздание'}, запрос пересоздания контейнера`);
+    await dependencies.recreateContainer(service.container, envVars, removedKeys, service.pullImage);
+    await clearPendingRecreate(dependencies.state, service.container);
+
+    const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
+    if (changedKeys.length > 0) {
+      debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);
     }
   } catch (err) {
     error(`[sync] ${service.container}: ${(err as Error).message}`);
   }
+}
+
+export function syncService(
+  service: ServiceConfig,
+  globalConfig: Config,
+  dependencies: SyncDependencies = defaultSyncDependencies,
+): Promise<void> {
+  const existing = syncInFlight.get(service.container);
+  if (existing) {
+    debug(`[sync] ${service.container}: предыдущая синхронизация ещё выполняется, объединяем цикл`);
+    return existing;
+  }
+
+  const sync = syncServiceOnce(service, globalConfig, dependencies).finally(() => {
+    if (syncInFlight.get(service.container) === sync) {
+      syncInFlight.delete(service.container);
+    }
+  });
+  syncInFlight.set(service.container, sync);
+  return sync;
 }
 
 function setupServiceSync(service: ServiceConfig, globalConfig: Config): void {
@@ -137,16 +234,21 @@ async function main(): Promise<void> {
   }
 }
 
-function handleShutdown(): void {
+async function handleShutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
   info('[config] Остановка агента');
   for (const timer of timers.values()) {
     clearInterval(timer);
   }
+  await Promise.allSettled([...stateWritesInFlight]);
   // eslint-disable-next-line no-process-exit
   process.exit(0);
 }
 
-process.on('SIGINT', handleShutdown);
-process.on('SIGTERM', handleShutdown);
-
-void main();
+const entrypoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
+if (import.meta.url === entrypoint) {
+  process.on('SIGINT', () => { void handleShutdown(); });
+  process.on('SIGTERM', () => { void handleShutdown(); });
+  void main();
+}

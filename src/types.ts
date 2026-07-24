@@ -66,6 +66,9 @@ export interface ServiceState {
   lastHash: string;
   lastSync: string;
   variableCount: number;
+  pendingRecreate?: {
+    removedKeys: string[];
+  };
 }
 
 export interface RecreateRequest {

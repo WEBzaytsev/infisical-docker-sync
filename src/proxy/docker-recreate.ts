@@ -3,7 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { info, error, warn, debug } from '../logger.js';
 import { EnvVars } from '../types.js';
 
-const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+const defaultDocker = new Docker({ socketPath: '/var/run/docker.sock' });
+let docker: Docker = defaultDocker;
+
+// Test seam: production always uses the socket-backed client; tests replace it with a deterministic fake.
+export function setDockerClientForTests(client?: Docker): void {
+  docker = client ?? defaultDocker;
+}
 const MANAGED_LABEL = 'infisical-docker-sync.enabled';
 const SELF_CONTAINER_NAMES = new Set([
   process.env.CONTAINER_NAME || 'recreate-proxy',
@@ -58,8 +64,6 @@ export interface DockerPullClient {
     ): unknown;
   };
 }
-
-const dockerPullClient = docker as unknown as DockerPullClient;
 
 function imageRegistry(image: string): string {
   const imageWithoutDigest = image.split('@', 1)[0];
@@ -165,13 +169,14 @@ export async function pullImageBeforeRecreate(
   image: string,
   enabled: boolean,
   authConfigFile = process.env.DOCKER_AUTH_CONFIG_FILE,
-  client: DockerPullClient = dockerPullClient,
+  client?: DockerPullClient,
 ): Promise<void> {
+  const pullClient = client ?? (docker as unknown as DockerPullClient);
   if (!enabled) return;
 
   const auth = await registryAuthForImage(image, authConfigFile);
   info(`[docker] ${image}: скачиваем свежий образ перед пересозданием`);
-  await pullImage(image, auth, client);
+  await pullImage(image, auth, pullClient);
   info(`[docker] ${image}: свежий образ скачан`);
 }
 

@@ -69,6 +69,75 @@ test('pullImageBeforeRecreate pulls a fresh image when the service flag is enabl
   }]);
 });
 
+test('pullImageBeforeRecreate supports direct Docker Hub credentials and normalizes the registry address', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'ids-docker-auth-'));
+  const authConfigFile = path.join(tempDir, 'config.json');
+  await writeFile(authConfigFile, JSON.stringify({
+    auths: {
+      'https://index.docker.io/v1/': { username: 'registry-user', password: 'registry-password' },
+    },
+  }));
+
+  const { client, calls } = createPullClient();
+  try {
+    await pullImageBeforeRecreate('library/alpine:3.20', true, authConfigFile, client);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(calls, [{
+    image: 'library/alpine:3.20',
+    auth: { username: 'registry-user', password: 'registry-password', serveraddress: 'docker.io' },
+  }]);
+});
+
+test('pullImageBeforeRecreate supports an identity token and rejects helper-only credentials', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'ids-docker-auth-'));
+  const tokenConfigFile = path.join(tempDir, 'token.json');
+  const helperConfigFile = path.join(tempDir, 'helper.json');
+  await writeFile(tokenConfigFile, JSON.stringify({
+    auths: { 'ghcr.io': { identitytoken: 'registry-identity-token' } },
+  }));
+  await writeFile(helperConfigFile, JSON.stringify({
+    credHelpers: { 'ghcr.io': 'secretservice' },
+  }));
+
+  const { client, calls } = createPullClient();
+  try {
+    await pullImageBeforeRecreate('ghcr.io/webzaytsev/private-image:latest', true, tokenConfigFile, client);
+    await assert.rejects(
+      pullImageBeforeRecreate('ghcr.io/webzaytsev/private-image:latest', true, helperConfigFile, client),
+      /credential helper/i,
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(calls, [{
+    image: 'ghcr.io/webzaytsev/private-image:latest',
+    auth: { identitytoken: 'registry-identity-token', serveraddress: 'ghcr.io' },
+  }]);
+});
+
+test('pullImageBeforeRecreate rejects malformed auth before requesting Docker', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'ids-docker-auth-'));
+  const authConfigFile = path.join(tempDir, 'config.json');
+  await writeFile(authConfigFile, JSON.stringify({
+    auths: { 'ghcr.io': { auth: Buffer.from('missing-separator').toString('base64') } },
+  }));
+
+  const { client, calls } = createPullClient();
+  try {
+    await assert.rejects(
+      pullImageBeforeRecreate('ghcr.io/webzaytsev/private-image:latest', true, authConfigFile, client),
+      /невалидный auth/,
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(calls, []);
+});
 test('pullImageBeforeRecreate does not pull when disabled', async () => {
   const { client, calls } = createPullClient();
 
