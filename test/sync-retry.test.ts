@@ -99,7 +99,35 @@ test('syncService serializes overlapping syncs for the same container', async ()
     releaseRecreate();
     await Promise.all([first, second]);
   } finally {
-    releaseRecreate();
+  }
+});
+
+test('syncService requests secrets from the configured Infisical folder', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ids-folder-'));
+  const state = new StateManager(path.join(dir, 'agent-state.json'));
+  const service: ServiceConfig = {
+    container: 'folder-app',
+    envDir: dir,
+    envFileName: '.env',
+    projectId: 'project-id',
+    environment: 'prod',
+    secretPath: '/applications/folder-app',
+  };
+  let receivedPath: string | undefined;
+
+  await state.loadState();
+  try {
+    await syncService(service, config, {
+      fetchEnv: async credentials => {
+        receivedPath = credentials.secretPath;
+        return { KEEP: 'new' };
+      },
+      recreateContainer: async () => undefined,
+      state,
+    });
+
+    assert.equal(receivedPath, '/applications/folder-app');
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

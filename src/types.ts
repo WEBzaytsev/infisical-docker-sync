@@ -12,6 +12,7 @@ export interface ServiceConfig {
   pullImage?: boolean; // перед пересозданием скачать свежий image из registry
   projectId: string;
   environment: string;
+  secretPath?: string; // папка Infisical, например /applications/my-app; по умолчанию /
   syncInterval?: number;
   overrides?: ServiceOverrides;
 }
@@ -31,6 +32,7 @@ export interface InfisicalCredentials {
   clientSecret: string;
   projectId: string;
   environment: string;
+  secretPath: string;
 }
 
 export interface EnvVars {

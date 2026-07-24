@@ -105,6 +105,7 @@ services:
     envFileOwner: "80:80"             # опционально: сохранить owner для Laravel/php-fpm и похожих случаев
     projectId: "project-id-из-infisical"
     environment: "prod"
+    # secretPath: "/applications/my-app"  # папка Infisical; по умолчанию корень /
 
   - container: "my-worker"
     envFileName: ".env"

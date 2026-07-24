@@ -26,6 +26,7 @@ const schema = Joi.object({
       pullImage: Joi.boolean().optional(),
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
+      secretPath: Joi.string().pattern(/^\/(?:[^/]+(?:\/[^/]+)*)?$/, 'absolute Infisical folder path').default('/'),
       syncInterval: Joi.number().integer().min(10),
       overrides: Joi.object({
         siteUrl: Joi.string().uri({ scheme: ['https', 'http'] }),

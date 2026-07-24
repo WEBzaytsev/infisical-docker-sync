@@ -49,6 +49,7 @@ export async function fetchEnv({
   clientSecret,
   projectId,
   environment,
+  secretPath,
 }: InfisicalCredentials): Promise<EnvVars> {
   try {
     const sdk = await getAuthenticatedSdk({ siteUrl, clientId, clientSecret });
@@ -58,7 +59,7 @@ export async function fetchEnv({
       projectId,
       expandSecretReferences: true,
       viewSecretValue: true,
-      secretPath: '/',
+      secretPath,
       recursive: true,
     })) as SecretResponse;
 

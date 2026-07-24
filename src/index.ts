@@ -78,10 +78,10 @@ async function syncServiceOnce(
       siteUrl: service.overrides?.siteUrl || globalConfig.siteUrl,
       clientId: service.overrides?.clientId || globalConfig.clientId,
       clientSecret: service.overrides?.clientSecret || globalConfig.clientSecret,
-      environment: service.environment,
       projectId: service.projectId,
+      environment: service.environment,
+      secretPath: service.secretPath || '/',
     };
-
     const envVars = await dependencies.fetchEnv(creds);
 
     if (Object.keys(envVars).length === 0) {

@@ -24,6 +24,7 @@ services:
   - container: my-backend
     projectId: your-project-id
     environment: dev
+    # secretPath: /applications/my-backend  # папка Infisical; по умолчанию корень /
     envDir: /app/data/envs
     envFileName: .env
     # envFileOwner: "80:80"  # опционально: сохранить owner файла для Laravel/php-fpm
