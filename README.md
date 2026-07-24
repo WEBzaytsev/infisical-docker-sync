@@ -96,7 +96,7 @@ siteUrl: "https://app.infisical.com"
 clientId: "client-id-из-infisical"
 clientSecret: "client-secret-из-infisical"
 syncInterval: 30   # интервал проверки, секунды (минимум 10)
-logLevel: "info"   # debug | info | silent
+logLevel: "info"   # info: изменения/ошибки; debug: каждая проверка; silent: без логов
 
 services:
   - container: "my-app"              # = container_name в compose приложения

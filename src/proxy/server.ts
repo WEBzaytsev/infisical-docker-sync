@@ -238,7 +238,7 @@ export function createProxyServer(options: ProxyServerOptions = {}): http.Server
     }
 
     handleRecreate(req, res, token, recreate).catch((err: unknown) => {
-      error(`[proxy] Внутренняя ошибка при пересоздании: ${(err as Error).message}`);
+      error(`внутренняя ошибка при пересоздании: ${(err as Error).message}`, { component: 'proxy' });
       if (!res.headersSent) {
         sendJson(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
           ok: false,
@@ -253,7 +253,7 @@ export function createProxyServer(options: ProxyServerOptions = {}): http.Server
 export function startProxyServer(port = Number(process.env.PROXY_PORT) || DEFAULT_PORT): http.Server {
   const server = createProxyServer();
   server.listen(port, () => {
-    info(`[proxy] proxy для пересоздания слушает порт ${port}`);
+    info(`proxy для пересоздания слушает порт ${port}`, { component: 'proxy' });
   });
   return server;
 }
@@ -263,7 +263,7 @@ if (import.meta.url === entrypoint) {
   try {
     startProxyServer();
   } catch (err) {
-    error(`[proxy] ${(err as Error).message}`);
+    error((err as Error).message, { component: 'proxy' });
     // eslint-disable-next-line no-process-exit
     process.exit(1);
   }

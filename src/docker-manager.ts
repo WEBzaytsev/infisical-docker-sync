@@ -81,9 +81,9 @@ export async function recreateContainer(
       throw new Error(result.error ?? `recreate-proxy ответил с кодом ${res.status}`);
     }
 
-    debug(`[docker] ${containerName}: пересоздание выполнено через proxy`);
+    debug('пересоздание выполнено через proxy', { component: 'docker', target: containerName });
   } catch (err) {
-    error(`[docker] ${containerName}: пересоздание через proxy не удалось: ${(err as Error).message}`);
+    error(`пересоздание через proxy не удалось: ${(err as Error).message}`, { component: 'docker', target: containerName });
     throw err;
   }
 }

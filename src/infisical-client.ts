@@ -72,10 +72,10 @@ export async function fetchEnv({
       }
     }
 
-    debug(`Получено ${Object.keys(output).length} секретов для ${environment}`);
+    debug(`получено ${Object.keys(output).length} секретов для ${environment}`, { component: 'infisical' });
     return output;
   } catch (err) {
-    error(`[infisical] Не удалось получить секреты — проверьте siteUrl, credentials и доступ к проекту: ${(err as Error).message}`);
+    error(`не удалось получить секреты — проверьте siteUrl, credentials и доступ к проекту: ${(err as Error).message}`, { component: 'infisical' });
     throw err;
   }
 }

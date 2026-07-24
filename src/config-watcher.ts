@@ -19,22 +19,22 @@ export function watchConfig(
   });
 
   watcher.on('change', (changedPath: string) => {
-    info(`[watch] config.yaml изменён (${changedPath}), перезагружаем`);
+    info(`config.yaml изменён (${changedPath}), перезагружаем`, { component: 'watch' });
     setTimeout(() => {
       try {
         onConfigChange();
       } catch (err) {
-        error(`[watch] Не удалось применить изменения config.yaml: ${(err as Error).message}`);
+        error(`не удалось применить изменения config.yaml: ${(err as Error).message}`, { component: 'watch' });
       }
     }, 500);
   });
 
   watcher.on('error', (err: unknown) => {
-    error(`[watch] Ошибка наблюдения за config.yaml: ${err instanceof Error ? err.message : String(err)}`);
+    error(`ошибка наблюдения за config.yaml: ${err instanceof Error ? err.message : String(err)}`, { component: 'watch' });
   });
 
   watcher.on('ready', () => {
-    info(`[watch] Hot-reload config.yaml активен: ${configPath}`);
+    info(`hot-reload config.yaml активен: ${configPath}`, { component: 'watch' });
   });
 
   return watcher;

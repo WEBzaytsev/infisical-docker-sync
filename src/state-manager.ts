@@ -34,7 +34,7 @@ export class StateManager {
         const loadedState = JSON.parse(stateData) as AgentState;
 
         if (loadedState.version !== STATE_VERSION) {
-          warn(`[state] Версия состояния ${loadedState.version} устарела (ожидается ${STATE_VERSION}) — сброс`);
+          warn(`версия состояния ${loadedState.version} устарела (ожидается ${STATE_VERSION}) — сброс`, { component: 'state' });
           this.state = this.createDefaultState();
           await this.saveState();
           return;
@@ -42,21 +42,21 @@ export class StateManager {
 
         this.state = loadedState;
         const count = Object.keys(this.state.services).length;
-        info(`[state] Загружено состояние синхронизации: ${count} сервисов`);
+        info(`загружено состояние синхронизации: ${count} сервисов`, { component: 'state' });
         for (const [name, s] of Object.entries(this.state.services)) {
-          debug(`[state] ${name}: ${s.variableCount} vars, ${s.lastSync}`);
+          debug(`${s.variableCount} vars, ${s.lastSync}`, { component: 'state', target: name });
         }
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-          info('[state] Файл состояния не найден — начнём с чистого');
+          info('файл состояния не найден — начинаем с чистого', { component: 'state' });
         } else {
-          warn(`[state] Не удалось прочитать файл состояния: ${(err as Error).message}`);
+          warn(`не удалось прочитать файл состояния: ${(err as Error).message}`, { component: 'state' });
         }
         this.state = this.createDefaultState();
         await this.saveState();
       }
     } catch (err) {
-      error(`[state] Критическая ошибка состояния: ${(err as Error).message}`);
+      error(`критическая ошибка состояния: ${(err as Error).message}`, { component: 'state' });
       this.state = this.createDefaultState();
     }
   }
@@ -78,10 +78,10 @@ export class StateManager {
       await fs.mkdir(path.dirname(this.stateFile), { recursive: true });
       await fs.writeFile(tmpPath, JSON.stringify(this.state, null, 2), { mode: 0o600, flag: 'wx' });
       await fs.rename(tmpPath, this.stateFile);
-      debug(`[state] Сохранено (${Object.keys(this.state.services).length} сервисов)`);
+      debug(`сохранено (${Object.keys(this.state.services).length} сервисов)`, { component: 'state' });
     } catch (err) {
       await fs.rm(tmpPath, { force: true }).catch(() => undefined);
-      error(`[state] Не удалось сохранить состояние синхронизации: ${(err as Error).message}`);
+      error(`не удалось сохранить состояние синхронизации: ${(err as Error).message}`, { component: 'state' });
       throw err;
     }
   }
@@ -108,7 +108,7 @@ export class StateManager {
         : { removedKeys: [...new Set(pendingRemovedKeys)] },
     };
     await this.saveState();
-    debug(`[sync] ${serviceName}: состояние обновлено`);
+    debug('состояние обновлено', { component: 'sync', target: serviceName });
   }
 
   getPendingRecreate(serviceName: string): ServiceState['pendingRecreate'] {
@@ -118,7 +118,7 @@ export class StateManager {
   async markRecreatePending(serviceName: string, removedKeys: string[]): Promise<void> {
     const serviceState = this.state.services[serviceName];
     if (!serviceState) {
-      throw new Error(`[state] ${serviceName}: нельзя отметить pending recreate без состояния сервиса`);
+      throw new Error(`${serviceName}: нельзя отметить pending recreate без состояния сервиса`);
     }
 
     serviceState.pendingRecreate = { removedKeys: [...new Set(removedKeys)] };
@@ -136,11 +136,11 @@ export class StateManager {
   hasServiceChanged(serviceName: string, currentHash: string): boolean {
     const serviceState = this.getServiceState(serviceName);
     if (!serviceState) {
-      debug(`[state] ${serviceName}: нет в состоянии, считаем изменённым`);
+      debug('нет в состоянии, считаем изменённым', { component: 'state', target: serviceName });
       return true;
     }
     const changed = serviceState.lastHash !== currentHash;
-    debug(`[state] ${serviceName}: ${changed ? 'изменился' : 'без изменений'}`);
+    debug(changed ? 'изменился' : 'без изменений', { component: 'state', target: serviceName });
     return changed;
   }
 }

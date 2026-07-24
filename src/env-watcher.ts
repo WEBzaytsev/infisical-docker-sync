@@ -39,19 +39,17 @@ export async function hasChanged(
     let diskVars: EnvVars = {};
     let diskContent = '';
 
-    debug(`[sync] ${serviceName}: проверяем ${filePath}`);
+    debug(`проверяем ${filePath}`, { component: 'sync', target: serviceName });
 
     try {
       const stat = await fs.stat(filePath);
-      debug(
-        `[sync] ${serviceName}: файл существует, size=${stat.size}б, mtime=${stat.mtime.toISOString()}`
-      );
+      debug(`файл существует, size=${stat.size}б, mtime=${stat.mtime.toISOString()}`, { component: 'sync', target: serviceName });
       diskContent = await fs.readFile(filePath, 'utf8');
       diskVars = parseDotenvContent(diskContent);
-      debug(`[sync] ${serviceName}: диск=${Object.keys(diskVars).length} vars, remote=${Object.keys(envVars).length} vars`);
+      debug(`диск=${Object.keys(diskVars).length} vars, Infisical=${Object.keys(envVars).length} vars`, { component: 'sync', target: serviceName });
     } catch {
-      debug(`[sync] ${serviceName}: файл не найден → создаём`);
-      info(`[sync] ${serviceName}: .env не найден — создаём из секретов Infisical`);
+      debug('файл не найден', { component: 'sync', target: serviceName });
+      info('.env отсутствует — создаём из секретов Infisical', { component: 'sync', target: serviceName });
       return { hasDiff: true, added: Object.keys(envVars), removed: [], changed: [] };
     }
 
@@ -59,23 +57,23 @@ export async function hasChanged(
     const hasDiff = added.length > 0 || removed.length > 0 || changed.length > 0;
 
     if (hasDiff) {
-      if (added.length > 0) debug(`[sync] ${serviceName}: +${added.join(', +')}`);
-      if (removed.length > 0) debug(`[sync] ${serviceName}: -${removed.join(', -')}`);
-      if (changed.length > 0) debug(`[sync] ${serviceName}: ~${changed.join(', ~')}`);
+      if (added.length > 0) debug(`добавлены: ${added.join(', ')}`, { component: 'sync', target: serviceName });
+      if (removed.length > 0) debug(`удалены: ${removed.join(', ')}`, { component: 'sync', target: serviceName });
+      if (changed.length > 0) debug(`изменены: ${changed.join(', ')}`, { component: 'sync', target: serviceName });
       info(
-        `[sync] ${serviceName}: изменения в секретах (+${added.length} −${removed.length} ~${changed.length}), обновим .env`
+        `секреты изменились (+${added.length} −${removed.length} ~${changed.length}), обновляем .env`,
+        { component: 'sync', target: serviceName },
       );
     } else {
       const diskHash = crypto.createHash('sha256').update(diskContent).digest('hex').slice(0, 12);
       const remoteContent = Object.entries(envVars).map(([k, v]) => `${k}=${v}`).sort().join('\n');
       const remoteHash = crypto.createHash('sha256').update(remoteContent).digest('hex').slice(0, 12);
-      debug(`[sync] ${serviceName}: хэш диска=${diskHash}, хэш remote=${remoteHash}`);
-      info(`[sync] ${serviceName}: секреты актуальны (${Object.keys(envVars).length} переменных), пересоздание не требуется`);
+      debug(`секреты актуальны (${Object.keys(envVars).length} переменных); хэш диска=${diskHash}, Infisical=${remoteHash}`, { component: 'sync', target: serviceName });
     }
 
     return { hasDiff, added, removed, changed };
   } catch (err) {
-    error(`[sync] ${serviceName}: не удалось сравнить .env с Infisical: ${(err as Error).message}`);
+    error(`не удалось сравнить .env с Infisical: ${(err as Error).message}`, { component: 'sync', target: serviceName });
     return { hasDiff: true, added: [], removed: [], changed: [] };
   }
 }
@@ -89,9 +87,9 @@ export async function updateServiceState(
   try {
     const hash = crypto.createHash('sha256').update(content).digest('hex');
     await stateManager.updateServiceState(serviceName, filePath, hash, variableCount);
-    debug(`[sync] ${serviceName}: состояние обновлено`);
+    debug('состояние обновлено', { component: 'sync', target: serviceName });
   } catch (err) {
-    error(`[sync] ${serviceName}: не удалось сохранить состояние синхронизации: ${(err as Error).message}`);
+    error(`не удалось сохранить состояние синхронизации: ${(err as Error).message}`, { component: 'sync', target: serviceName });
   }
 }
 
@@ -149,7 +147,7 @@ export async function writeEnvFileSafely(
     await fs.chmod(tmpPath, 0o600);
     await chownIfRoot(tmpPath, owner);
     await fs.rename(tmpPath, filePath);
-    debug(`[sync] ${serviceName}: env записан атомарно → ${filePath}`);
+    debug(`.env записан атомарно → ${filePath}`, { component: 'sync', target: serviceName });
   } catch (err) {
     await fs.rm(tmpPath, { force: true }).catch(() => undefined);
     throw err;
@@ -162,19 +160,19 @@ export async function ensureEnvDir(filePath: string): Promise<void> {
 
   const uid = process.getuid?.() ?? '?';
   const gid = process.getgid?.() ?? '?';
-  debug(`[sync] процесс: uid=${uid}, gid=${gid}`);
+  debug(`процесс: uid=${uid}, gid=${gid}`, { component: 'sync' });
 
   try {
     const dirStat = await fs.stat(dir);
     const mode = (dirStat.mode & 0o777).toString(8);
-    debug(`[sync] директория ${dir}: uid=${dirStat.uid}, gid=${dirStat.gid}, mode=0${mode}`);
+    debug(`директория ${dir}: uid=${dirStat.uid}, gid=${dirStat.gid}, mode=0${mode}`, { component: 'sync' });
   } catch {
     // stat не критичен
   }
 
   try {
     await fs.access(dir, fsConstants.W_OK);
-    debug(`[sync] директория ${dir}: доступ на запись OK`);
+    debug(`директория ${dir}: доступ на запись OK`, { component: 'sync' });
   } catch {
     throw new Error(
       `Нет прав на запись в envDir (${dir}). Проверьте монтирование volume в compose агента и user (uid=${uid}, gid=${gid})`
@@ -185,13 +183,13 @@ export async function ensureEnvDir(filePath: string): Promise<void> {
     await fs.access(filePath, fsConstants.F_OK);
     const fileStat = await fs.stat(filePath);
     const mode = (fileStat.mode & 0o777).toString(8);
-    debug(`[sync] файл ${filePath}: uid=${fileStat.uid}, gid=${fileStat.gid}, mode=0${mode}`);
+    debug(`файл ${filePath}: uid=${fileStat.uid}, gid=${fileStat.gid}, mode=0${mode}`, { component: 'sync' });
     await fs.access(filePath, fsConstants.W_OK);
-    debug(`[sync] файл ${filePath}: доступ на запись OK`);
+    debug(`файл ${filePath}: доступ на запись OK`, { component: 'sync' });
   } catch (err) {
     const msg = (err as NodeJS.ErrnoException).message;
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      debug(`[sync] файл ${filePath}: нет доступа на запись — ${msg}`);
+      debug(`файл ${filePath}: нет доступа на запись — ${msg}`, { component: 'sync' });
     }
   }
 }

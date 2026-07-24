@@ -85,7 +85,7 @@ async function syncServiceOnce(
     const envVars = await dependencies.fetchEnv(creds);
 
     if (Object.keys(envVars).length === 0) {
-      warn(`[sync] ${service.container}: Infisical вернул пустой список секретов — проверьте projectId и environment в config.yaml`);
+      warn('Infisical вернул пустой список секретов — проверьте projectId и environment в config.yaml', { component: 'sync', target: service.container });
       return;
     }
 
@@ -119,24 +119,24 @@ async function syncServiceOnce(
       );
       await writeEnvFileSafely(service.container, envPath, envText, service.envFileOwner);
       const written = await fs.stat(envPath);
-      debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
+      debug(`.env записан → ${absPath} (${written.size}б)`, { component: 'sync', target: service.container });
     }
 
     if (!diff.hasDiff && !pending) {
-      debug(`[sync] ${service.container}: нет изменений, файл не записан: ${absPath}`);
+      debug(`нет изменений, файл не записан: ${absPath}`, { component: 'sync', target: service.container });
       return;
     }
 
-    info(`[sync] ${service.container}: ${diff.hasDiff ? `записано ${variableCount} переменных` : 'повторяем неудавшееся пересоздание'}, запрос пересоздания контейнера`);
+    info(`${diff.hasDiff ? `записано ${variableCount} переменных` : 'повторяем неудавшееся пересоздание'}; запрашиваем пересоздание контейнера`, { component: 'sync', target: service.container });
     await dependencies.recreateContainer(service.container, envVars, removedKeys, service.pullImage);
     await clearPendingRecreate(dependencies.state, service.container);
 
     const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
     if (changedKeys.length > 0) {
-      debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);
+      debug(`применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`, { component: 'sync', target: service.container });
     }
   } catch (err) {
-    error(`[sync] ${service.container}: ${(err as Error).message}`);
+    error((err as Error).message, { component: 'sync', target: service.container });
   }
 }
 
@@ -147,7 +147,7 @@ export function syncService(
 ): Promise<void> {
   const existing = syncInFlight.get(service.container);
   if (existing) {
-    debug(`[sync] ${service.container}: предыдущая синхронизация ещё выполняется, объединяем цикл`);
+    debug('предыдущая синхронизация ещё выполняется, объединяем цикл', { component: 'sync', target: service.container });
     return existing;
   }
 
@@ -168,13 +168,13 @@ function setupServiceSync(service: ServiceConfig, globalConfig: Config): void {
   const intervalMs = (service.syncInterval || globalConfig.syncInterval || 60) * 1000;
 
   if (service.syncInterval) {
-    debug(`[sync] ${service.container}: интервал ${service.syncInterval}с`);
+    debug(`интервал ${service.syncInterval}с`, { component: 'sync', target: service.container });
   }
 
   void syncService(service, globalConfig);
 
   const timer = setInterval(() => {
-    debug(`[sync] ${service.container}: периодическая проверка`);
+    debug('периодическая проверка', { component: 'sync', target: service.container });
     void syncService(service, globalConfig);
   }, intervalMs);
 
@@ -197,20 +197,20 @@ async function recreateConfig(): Promise<void> {
       setupServiceSync(service, config);
     }
 
-    info(`[config] config.yaml перезагружен: ${config.services.length} сервисов`);
+    info(`config.yaml перезагружен: ${config.services.length} сервисов`, { component: 'config' });
   } catch (err) {
-    error(`[config] Не удалось перезагрузить config.yaml: ${(err as Error).message}`);
+    error(`не удалось перезагрузить config.yaml: ${(err as Error).message}`, { component: 'config' });
   }
 }
 
 async function main(): Promise<void> {
-  info('[config] Запуск Infisical Docker Sync — загрузка config.yaml');
+  info('запуск агента; загружаем config.yaml', { component: 'config' });
 
   const examplePath = '/app/config.example.yaml';
   if (!existsSync(configPath) && existsSync(examplePath)) {
     await fs.copyFile(examplePath, configPath);
     await fs.chmod(configPath, 0o600);
-    info('[config] Создан config.yaml из примера — заполните credentials и services, затем перезапустите или сохраните файл');
+    info('создан config.yaml из примера — заполните credentials и services, затем перезапустите или сохраните файл', { component: 'config' });
   }
 
   try {
@@ -218,26 +218,26 @@ async function main(): Promise<void> {
     const config = await loadConfig(configPath);
     setLogLevel(config.logLevel);
 
-    info(`[config] Синхронизация: ${config.services.length} сервисов, интервал ${config.syncInterval} с`);
+    info(`синхронизация: ${config.services.length} сервисов, интервал ${config.syncInterval} с`, { component: 'config' });
 
     for (const service of config.services) {
       setupServiceSync(service, config);
     }
   } catch (err) {
-    error(`[config] Не удалось загрузить config.yaml: ${(err as Error).message}`);
+    error(`не удалось загрузить config.yaml: ${(err as Error).message}`, { component: 'config' });
   }
 
   try {
     watchConfig(configPath, recreateConfig);
   } catch (err) {
-    warn(`[watch] Не удалось включить hot-reload config.yaml: ${(err as Error).message}`);
+    warn(`не удалось включить hot-reload config.yaml: ${(err as Error).message}`, { component: 'watch' });
   }
 }
 
 async function handleShutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  info('[config] Остановка агента');
+  info('остановка агента', { component: 'config' });
   for (const timer of timers.values()) {
     clearInterval(timer);
   }

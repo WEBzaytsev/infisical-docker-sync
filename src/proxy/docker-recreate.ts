@@ -175,9 +175,9 @@ export async function pullImageBeforeRecreate(
   if (!enabled) return;
 
   const auth = await registryAuthForImage(image, authConfigFile);
-  info(`[docker] ${image}: скачиваем свежий образ перед пересозданием`);
+  info('скачиваем свежий образ перед пересозданием', { component: 'docker', target: image });
   await pullImage(image, auth, pullClient);
-  info(`[docker] ${image}: свежий образ скачан`);
+  info('свежий образ скачан', { component: 'docker', target: image });
 }
 
 function extractComposeInfo(labels: Record<string, string>): ComposeInfo | null {

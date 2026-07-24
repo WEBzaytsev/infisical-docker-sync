@@ -18,7 +18,7 @@ siteUrl: https://app.infisical.com
 clientId: your-client-id
 clientSecret: your-client-secret
 syncInterval: 60       # секунды, минимум 10
-logLevel: info         # debug | info | silent
+logLevel: info         # info: только изменения/ошибки; debug: каждая проверка; silent: без логов
 
 services:
   - container: my-backend

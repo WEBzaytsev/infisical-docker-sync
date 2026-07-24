@@ -91,10 +91,10 @@ export async function loadConfig(configPath: string): Promise<Config> {
     const config = value as Config;
     assertSafeInfisicalUrls(config);
 
-    info(`[config] config.yaml загружен: ${config.services.length} сервисов (${absolutePath})`);
+    info(`config.yaml загружен: ${config.services.length} сервисов (${absolutePath})`, { component: 'config' });
     return config;
   } catch (err) {
-    error(`[config] Не удалось прочитать config.yaml: ${(err as Error).message}`);
+    error(`не удалось прочитать config.yaml: ${(err as Error).message}`, { component: 'config' });
     throw err;
   }
 }
