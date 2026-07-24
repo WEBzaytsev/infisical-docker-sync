@@ -27,6 +27,7 @@ services:
     envDir: /app/data/envs
     envFileName: .env
     # envFileOwner: "80:80"  # опционально: сохранить owner файла для Laravel/php-fpm
+    # pullImage: true  # перед пересозданием скачать свежий образ для этого контейнера
     # syncInterval: 120  # свой интервал для этого сервиса
     # overrides:         # другие credentials для отдельного проекта
     #   siteUrl: https://custom.infisical.com

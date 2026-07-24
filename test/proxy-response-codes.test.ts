@@ -9,6 +9,7 @@ const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 let server: http.Server;
 let baseUrl = '';
 let recreateCalls = 0;
+let lastPullImage: boolean | undefined;
 
 interface ProxyTestResponse {
   status: number;
@@ -57,8 +58,9 @@ async function proxyRequest(
 before(async () => {
   server = createProxyServer({
     token: TOKEN,
-    recreate: async container => {
+    recreate: async (container, _env, _removed, pullImage) => {
       recreateCalls += 1;
+      lastPullImage = pullImage;
       if (container === 'boom') throw new Error('docker failed');
     },
   });
@@ -138,4 +140,16 @@ test('proxy returns 200 ok after successful recreation', async () => {
   assert.equal(res.body.ok, true);
   assert.equal(res.body.code, RESPONSE_CODES.OK);
   assert.equal(recreateCalls, beforeCalls + 1);
+});
+
+test('proxy forwards per-service pullImage to the recreate handler', async () => {
+  const res = await proxyRequest(
+    'POST',
+    '/recreate',
+    '{"container":"app","pullImage":true}',
+    { 'x-proxy-token': TOKEN },
+  );
+
+  assert.equal(res.status, HTTP_STATUS.OK);
+  assert.equal(lastPullImage, true);
 });

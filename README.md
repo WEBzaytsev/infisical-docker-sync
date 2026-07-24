@@ -322,6 +322,47 @@ recreate-proxy (nonroot 65532, сокет :ro)
 
 **Почему не generic Docker proxy:** фильтры по endpoint/методу не проверяют тело запроса — `POST /containers/create` может передать `Privileged` или `Binds: ["/:/host"]`. Наш proxy не принимает `HostConfig` из запроса.
 
+### Опциональный pull свежего образа
+
+По умолчанию proxy пересоздаёт контейнер с образом, который уже есть у Docker daemon. Чтобы перед пересозданием конкретного сервиса скачать свежий образ по тому же тегу, добавьте `pullImage: true` в его блок `config.yaml`:
+
+```yaml
+services:
+  - container: my-backend
+    projectId: your-project-id
+    environment: prod
+    envDir: /app/data/envs
+    envFileName: .env
+    pullImage: true
+```
+
+Для публичных registry этого достаточно. Для приватного registry добавьте в **recreate-proxy** read-only Docker auth config:
+
+```yaml
+services:
+  recreate-proxy:
+    environment:
+      DOCKER_AUTH_CONFIG_FILE: /run/docker-auth/config.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${HOME}/.credentials/infisical-docker-sync/config.json:/run/docker-auth/config.json:ro
+```
+
+Pull выполняется **до** `stop` и `remove` target-контейнера и его зависимостей: если registry или авторизация недоступны, существующие контейнеры остаются запущенными. Proxy получает имя образа только из `inspect` уже разрешённого контейнера — image нельзя подменить через `POST /recreate`.
+
+Для приватного registry создайте на хосте отдельный Docker config с прямым matching entry в `auths`, не передавайте credentials через environment и не коммитьте файл. Proxy не запускает Docker credential helpers:
+
+```bash
+install -d -m 0700 "$HOME/.credentials/infisical-docker-sync"
+docker --config "$HOME/.credentials/infisical-docker-sync" login ghcr.io
+chgrp 65532 "$HOME/.credentials/infisical-docker-sync/config.json"
+chmod 0640 "$HOME/.credentials/infisical-docker-sync/config.json"
+```
+
+`recreate-proxy` работает как uid/gid `65532`, поэтому смонтированный config должен быть читаем этой группой. Если заданный `DOCKER_AUTH_CONFIG_FILE` нельзя прочитать или он невалиден, proxy прервёт операцию до остановки контейнера. То же произойдёт, если для образа нет прямого matching entry в `auths`, а конфиг требует `credsStore` или matching `credHelpers`; при прямом matching entry proxy использует его и не вызывает helper.
+
+Агент ждёт ответ proxy до 15 минут; для особенно медленного registry этот лимит можно изменить положительным числом миллисекунд через `PROXY_REQUEST_TIMEOUT_MS`. Если агент отключится во время pull, proxy отменит пересоздание после завершения pull и не остановит/не удалит контейнеры.
+
 ### Коды ответов recreate-proxy
 
 Все ответы proxy возвращаются в JSON-формате `{ ok, code, error? }`, где `code` — стабильный машинный код результата.
@@ -344,7 +385,9 @@ recreate-proxy (nonroot 65532, сокет :ro)
 | `PROXY_TOKEN` | оба | Общий секрет для `POST /recreate`. Обязателен, минимум 32 символа; рекомендуется `openssl rand -hex 32` |
 | `PROXY_URL` | агент | URL proxy. По умолчанию `http://recreate-proxy:8080`; host должен быть внутренним и входить в allowlist |
 | `PROXY_ALLOWED_HOSTS` | агент | Разрешённые hosts для `PROXY_URL`. По умолчанию `recreate-proxy,localhost,127.0.0.1,::1` |
+| `PROXY_REQUEST_TIMEOUT_MS` | агент | Время ожидания ответа recreate-proxy в миллисекундах. По умолчанию `900000` (15 минут) |
 | `PROXY_PORT` | proxy | Порт HTTP-сервера. По умолчанию `8080` |
+| `DOCKER_AUTH_CONFIG_FILE` | proxy | Необязательный путь внутри proxy к read-only Docker config с `auths` для сервисов с `pullImage: true` |
 | `CONFIG_PATH` | агент | Путь к config. По умолчанию `/app/data/config.yaml` |
 | `CONTAINER_NAME` | оба | Префикс в логах |
 | `DOCKER_GID` | proxy | GID группы docker для `group_add` |

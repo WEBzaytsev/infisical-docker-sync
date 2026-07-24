@@ -50,7 +50,7 @@ async function syncService(service: ServiceConfig, globalConfig: Config): Promis
       debug(`[sync] ${service.container}: env записан → ${absPath} (${written.size}б)`);
       await updateServiceState(service.container, envPath, envText, variableCount);
       info(`[sync] ${service.container}: записано ${variableCount} переменных, запрос пересоздания контейнера`);
-      await recreateContainer(service.container, envVars, diff.removed);
+      await recreateContainer(service.container, envVars, diff.removed, service.pullImage);
       const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
       if (changedKeys.length > 0) {
         debug(`[sync] ${service.container}: применены ключи: ${changedKeys.slice(0, 5).join(', ')}${changedKeys.length > 5 ? ` (+${changedKeys.length - 5})` : ''}`);

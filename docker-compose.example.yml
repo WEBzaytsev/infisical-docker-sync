@@ -15,8 +15,12 @@ services:
     environment:
       - PROXY_TOKEN=${PROXY_TOKEN}
       - CONTAINER_NAME=recreate-proxy
+      # Для приватного registry: auth config используется только сервисами с pullImage: true в config.yaml.
+      # - DOCKER_AUTH_CONFIG_FILE=/run/docker-auth/config.json
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker config с auths для приватного registry; файл должен читаться uid/gid 65532.
+      # - ${HOME}/.credentials/infisical-docker-sync/config.json:/run/docker-auth/config.json:ro
     group_add:
       - "${DOCKER_GID:-999}"
     cap_drop: [ALL]

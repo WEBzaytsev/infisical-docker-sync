@@ -9,6 +9,7 @@ export interface ServiceConfig {
   envFileName: string;
   envDir: string; // Директория где создавать env файл (монтированная в хост)
   envFileOwner?: string; // uid:gid для atomic rewrite, например "80:80"
+  pullImage?: boolean; // перед пересозданием скачать свежий image из registry
   projectId: string;
   environment: string;
   syncInterval?: number;
@@ -71,6 +72,7 @@ export interface RecreateRequest {
   container: string;
   env?: EnvVars;
   removed?: string[];
+  pullImage?: boolean;
 }
 
 export interface RecreateResponse {

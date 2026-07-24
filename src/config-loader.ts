@@ -23,6 +23,7 @@ const schema = Joi.object({
         .required(),
       envDir: Joi.string().required(),
       envFileOwner: Joi.string().pattern(/^\d+:\d+$/, 'uid:gid').optional(),
+      pullImage: Joi.boolean().optional(),
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
       syncInterval: Joi.number().integer().min(10),

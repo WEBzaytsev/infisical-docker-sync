@@ -38,17 +38,30 @@ export function validateProxyUrl(rawUrl: string, allowedHosts = allowedProxyHost
 
 const PROXY_URL = validateProxyUrl(process.env.PROXY_URL || DEFAULT_PROXY_URL);
 const PROXY_TOKEN = process.env.PROXY_TOKEN || '';
-const REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15 * 60_000;
+
+function requestTimeoutMs(): number {
+  const configured = process.env.PROXY_REQUEST_TIMEOUT_MS;
+  if (configured === undefined) return DEFAULT_REQUEST_TIMEOUT_MS;
+
+  const timeout = Number(configured);
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+    throw new Error('PROXY_REQUEST_TIMEOUT_MS должен быть положительным целым числом миллисекунд');
+  }
+  return timeout;
+}
 
 export async function recreateContainer(
   containerName: string,
   envVars?: EnvVars,
   removedKeys: string[] = [],
+  pullImage?: boolean,
 ): Promise<void> {
   const payload: RecreateRequest = {
     container: containerName,
     env: envVars,
     removed: removedKeys,
+    ...(pullImage === undefined ? {} : { pullImage }),
   };
 
   try {
@@ -59,7 +72,7 @@ export async function recreateContainer(
         'x-proxy-token': PROXY_TOKEN,
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(requestTimeoutMs()),
     });
 
     const result = (await res.json().catch(() => ({}))) as RecreateResponse;

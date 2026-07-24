@@ -55,6 +55,29 @@ services:
   await rm(dir, { recursive: true, force: true });
 });
 
+test('loadConfig accepts pullImage as a per-service option', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ids-config-'));
+  const configPath = path.join(dir, 'config.yaml');
+
+  await writeFile(configPath, `
+siteUrl: https://app.infisical.com
+clientId: client-id
+clientSecret: client-secret
+services:
+  - container: app
+    envFileName: .env
+    envDir: ${dir}
+    projectId: project-id
+    environment: prod
+    pullImage: true
+`);
+
+  const config = await loadConfig(configPath);
+  assert.equal(config.services[0].pullImage, true);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
 test('validateProxyToken rejects weak values', () => {
   assert.throws(() => validateProxyToken('test'), /минимум 32 символа/i);
   assert.throws(() => validateProxyToken('a'.repeat(32)), /слабое значение/i);

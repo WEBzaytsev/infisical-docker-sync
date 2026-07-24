@@ -34,7 +34,13 @@ export const RESPONSE_CODES = {
 } as const;
 
 type ResponseCode = typeof RESPONSE_CODES[keyof typeof RESPONSE_CODES];
-type RecreateHandler = (container: string, env?: RecreateRequest['env'], removed?: string[]) => Promise<void>;
+type RecreateHandler = (
+  container: string,
+  env?: RecreateRequest['env'],
+  removed?: string[],
+  pullImage?: boolean,
+  signal?: AbortSignal,
+) => Promise<void>;
 
 interface JsonResponse {
   ok: boolean;
@@ -54,6 +60,7 @@ const schema = Joi.object({
     .required(),
   env: Joi.object().pattern(Joi.string(), Joi.string().allow('')).optional(),
   removed: Joi.array().items(Joi.string()).optional(),
+  pullImage: Joi.boolean().optional(),
 });
 
 class RequestBodyTooLargeError extends Error {
@@ -177,16 +184,28 @@ async function handleRecreate(
     return;
   }
 
-  const { container, env, removed } = value as RecreateRequest;
+  const { container, env, removed, pullImage } = value as RecreateRequest;
+  const abortController = new AbortController();
+  const abortRecreate = (): void => abortController.abort();
+  req.once('aborted', abortRecreate);
+  res.once('close', abortRecreate);
+
   try {
-    await recreate(container, env, removed);
-    sendJson(res, HTTP_STATUS.OK, { ok: true, code: RESPONSE_CODES.OK });
+    await recreate(container, env, removed, pullImage, abortController.signal);
+    if (!abortController.signal.aborted) {
+      sendJson(res, HTTP_STATUS.OK, { ok: true, code: RESPONSE_CODES.OK });
+    }
   } catch (err) {
-    sendJson(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-      ok: false,
-      code: RESPONSE_CODES.RECREATE_FAILED,
-      error: (err as Error).message,
-    });
+    if (!abortController.signal.aborted) {
+      sendJson(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+        ok: false,
+        code: RESPONSE_CODES.RECREATE_FAILED,
+        error: (err as Error).message,
+      });
+    }
+  } finally {
+    req.removeListener('aborted', abortRecreate);
+    res.removeListener('close', abortRecreate);
   }
 }
 

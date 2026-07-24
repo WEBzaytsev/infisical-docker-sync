@@ -1,4 +1,5 @@
 import Docker from 'dockerode';
+import { readFile } from 'node:fs/promises';
 import { info, error, warn, debug } from '../logger.js';
 import { EnvVars } from '../types.js';
 
@@ -23,11 +24,169 @@ interface ComposeInfo {
   service: string;
 }
 
+interface DockerConfigAuth {
+  auth?: string;
+  identitytoken?: string;
+  password?: string;
+  username?: string;
+}
+
+interface DockerAuthConfig {
+  auths?: Record<string, DockerConfigAuth>;
+  credHelpers?: Record<string, string>;
+  credsStore?: string;
+}
+
+interface RegistryAuth {
+  serveraddress: string;
+  username?: string;
+  password?: string;
+  identitytoken?: string;
+}
+
+export interface DockerPullClient {
+  pull(
+    image: string,
+    options: object,
+    callback: (err: Error | null | undefined, stream?: NodeJS.ReadableStream) => void,
+    auth?: RegistryAuth,
+  ): unknown;
+  modem: {
+    followProgress(
+      stream: NodeJS.ReadableStream,
+      callback: (err: Error | null | undefined, output: unknown[]) => void,
+    ): unknown;
+  };
+}
+
+const dockerPullClient = docker as unknown as DockerPullClient;
+
+function imageRegistry(image: string): string {
+  const imageWithoutDigest = image.split('@', 1)[0];
+  const firstSlash = imageWithoutDigest.indexOf('/');
+  if (firstSlash === -1) return 'docker.io';
+
+  const candidate = imageWithoutDigest.slice(0, firstSlash).toLowerCase();
+  return candidate.includes('.') || candidate.includes(':') || candidate === 'localhost'
+    ? candidate
+    : 'docker.io';
+}
+
+function normalizeRegistryAddress(address: string): string {
+  const withoutScheme = address.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase();
+  const host = withoutScheme.split('/', 1)[0];
+  return ['docker.io', 'index.docker.io', 'registry-1.docker.io'].includes(host) ? 'docker.io' : host;
+}
+
+async function registryAuthForImage(image: string, authConfigFile?: string): Promise<RegistryAuth | undefined> {
+  if (!authConfigFile) return undefined;
+
+  let config: DockerAuthConfig;
+  try {
+    config = JSON.parse(await readFile(authConfigFile, 'utf8')) as DockerAuthConfig;
+  } catch (err) {
+    throw new Error(
+      `DOCKER_AUTH_CONFIG_FILE недоступен или содержит невалидный JSON: ${(err as Error).message}`,
+      { cause: err },
+    );
+  }
+
+  const registry = imageRegistry(image);
+  const authEntry = Object.entries(config.auths || {})
+    .find(([address]) => normalizeRegistryAddress(address) === registry)?.[1];
+
+  if (!authEntry) {
+    const hasCredentialHelper = config.credsStore ||
+      Object.keys(config.credHelpers || {}).some(address => normalizeRegistryAddress(address) === registry);
+    if (hasCredentialHelper) {
+      throw new Error(
+        `Docker credential helper для ${registry} не поддерживается; экспортируйте credentials в auths в ${authConfigFile}`,
+      );
+    }
+    return undefined;
+  }
+
+  if (authEntry.identitytoken) {
+    return { serveraddress: registry, identitytoken: authEntry.identitytoken };
+  }
+
+  if (authEntry.username !== undefined && authEntry.password !== undefined) {
+    return {
+      serveraddress: registry,
+      username: authEntry.username,
+      password: authEntry.password,
+    };
+  }
+
+  if (!authEntry.auth) {
+    throw new Error(`В Docker auth config нет credentials для ${registry}`);
+  }
+
+  const decoded = Buffer.from(authEntry.auth, 'base64').toString('utf8');
+  const separator = decoded.indexOf(':');
+  if (separator <= 0) {
+    throw new Error(`Docker auth config для ${registry} содержит невалидный auth`);
+  }
+
+  return {
+    serveraddress: registry,
+    username: decoded.slice(0, separator),
+    password: decoded.slice(separator + 1),
+  };
+}
+
+function pullImage(image: string, auth: RegistryAuth | undefined, client: DockerPullClient): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onPull = (pullErr: Error | null | undefined, stream?: NodeJS.ReadableStream): void => {
+      if (pullErr) {
+        reject(pullErr);
+        return;
+      }
+      if (!stream) {
+        reject(new Error(`Docker не вернул stream при pull ${image}`));
+        return;
+      }
+      client.modem.followProgress(stream, progressErr => progressErr ? reject(progressErr) : resolve());
+    };
+
+    try {
+      if (auth) {
+        client.pull(image, {}, onPull, auth);
+      } else {
+        client.pull(image, {}, onPull);
+      }
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+export async function pullImageBeforeRecreate(
+  image: string,
+  enabled: boolean,
+  authConfigFile = process.env.DOCKER_AUTH_CONFIG_FILE,
+  client: DockerPullClient = dockerPullClient,
+): Promise<void> {
+  if (!enabled) return;
+
+  const auth = await registryAuthForImage(image, authConfigFile);
+  info(`[docker] ${image}: скачиваем свежий образ перед пересозданием`);
+  await pullImage(image, auth, client);
+  info(`[docker] ${image}: свежий образ скачан`);
+}
+
 function extractComposeInfo(labels: Record<string, string>): ComposeInfo | null {
   const project = labels['com.docker.compose.project'];
   const service = labels['com.docker.compose.service'];
   if (!project || !service) return null;
   return { project, service };
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error('[docker] пересоздание отменено: клиент proxy отключился');
 }
 
 async function findDependentContainers(project: string, targetService: string): Promise<ContainerInfo[]> {
@@ -101,6 +260,7 @@ async function recreateContainerCore(
   containerInfo: ContainerInfo,
   envVars?: EnvVars,
   removedKeys: string[] = [],
+  signal?: AbortSignal,
 ): Promise<void> {
   const name = containerInfo.Labels?.['com.docker.compose.service']
     ?? containerInfo.Names?.[0]?.replace(/^\//, '')
@@ -109,6 +269,8 @@ async function recreateContainerCore(
   const container = docker.getContainer(containerInfo.Id);
   const containerData = await container.inspect();
 
+  // После начала stop/remove последовательность нельзя прерывать: иначе контейнер останется остановленным.
+  throwIfAborted(signal);
   if (containerInfo.State === 'running') {
     debug(`[docker] ${name}: остановка`);
     await container.stop({ t: 10 });
@@ -189,47 +351,53 @@ async function recreateViaDockerAPI(
   containerInfo: ContainerInfo,
   envVars?: EnvVars,
   removedKeys: string[] = [],
+  signal?: AbortSignal,
 ): Promise<void> {
   debug(`[docker] ${service}: найден (${containerInfo.Id.slice(0, 12)})`);
 
   const dependentContainers = await findDependentContainers(project, service);
   const stoppedDependents: { id: string; name: string; wasRunning: boolean }[] = [];
 
-  for (const depContainer of dependentContainers) {
-    const depName = depContainer.Labels?.['com.docker.compose.service']
-      ?? depContainer.Names?.[0]?.replace(/^\//, '')
-      ?? depContainer.Id.slice(0, 12);
-    const wasRunning = depContainer.State === 'running';
+  try {
+    throwIfAborted(signal);
+    for (const depContainer of dependentContainers) {
+      const depName = depContainer.Labels?.['com.docker.compose.service']
+        ?? depContainer.Names?.[0]?.replace(/^\//, '')
+        ?? depContainer.Id.slice(0, 12);
+      const wasRunning = depContainer.State === 'running';
 
-    if (wasRunning) {
-      debug(`[docker] остановка зависимого: ${depName}`);
-      await docker.getContainer(depContainer.Id).stop({ t: 10 });
+      if (wasRunning) {
+        throwIfAborted(signal);
+        debug(`[docker] остановка зависимого: ${depName}`);
+        await docker.getContainer(depContainer.Id).stop({ t: 10 });
+      }
+
+      stoppedDependents.push({ id: depContainer.Id, name: depName, wasRunning });
     }
 
-    stoppedDependents.push({ id: depContainer.Id, name: depName, wasRunning });
-  }
+    throwIfAborted(signal);
+    await recreateContainerCore(containerInfo, envVars, removedKeys, signal);
+  } finally {
+    for (const dependent of stoppedDependents) {
+      if (!dependent.wasRunning) continue;
+      try {
+        const currentDepContainers = await docker.listContainers({
+          all: true,
+          filters: {
+            label: [`com.docker.compose.project=${project}`],
+            name: [dependent.name],
+          },
+        });
 
-  await recreateContainerCore(containerInfo, envVars, removedKeys);
-
-  for (const dependent of stoppedDependents) {
-    if (!dependent.wasRunning) continue;
-    try {
-      const currentDepContainers = await docker.listContainers({
-        all: true,
-        filters: {
-          label: [`com.docker.compose.project=${project}`],
-          name: [dependent.name],
-        },
-      });
-
-      if (currentDepContainers.length > 0) {
-        await docker.getContainer(currentDepContainers[0].Id).start();
-      } else {
-        await docker.getContainer(dependent.id).start();
+        if (currentDepContainers.length > 0) {
+          await docker.getContainer(currentDepContainers[0].Id).start();
+        } else {
+          await docker.getContainer(dependent.id).start();
+        }
+        info(`[docker] зависимый ${dependent.name}: запущен после пересоздания`);
+      } catch (depErr) {
+        warn(`[docker] зависимый ${dependent.name}: не удалось запустить: ${(depErr as Error).message}`);
       }
-      info(`[docker] зависимый ${dependent.name}: запущен после пересоздания`);
-    } catch (depErr) {
-      warn(`[docker] зависимый ${dependent.name}: не удалось запустить: ${(depErr as Error).message}`);
     }
   }
 }
@@ -238,6 +406,8 @@ export async function recreateContainer(
   containerName: string,
   envVars?: EnvVars,
   removedKeys: string[] = [],
+  pullImage = false,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
     const containers = await docker.listContainers({
@@ -257,12 +427,27 @@ export async function recreateContainer(
     const composeInfo = extractComposeInfo(containerInfo.Labels || {});
     assertContainerAllowed(containerInfo, containerName);
 
+    if (pullImage) {
+      // Pull завершается до остановки target и его зависимых контейнеров.
+      throwIfAborted(signal);
+      const containerData = await docker.getContainer(containerInfo.Id).inspect();
+      await pullImageBeforeRecreate(containerData.Config.Image, true);
+      throwIfAborted(signal);
+    }
+
     if (composeInfo) {
       debug(`[docker] ${containerName}: compose (${composeInfo.project}/${composeInfo.service})`);
-      await recreateViaDockerAPI(composeInfo.project, composeInfo.service, containerInfo, envVars, removedKeys);
+      await recreateViaDockerAPI(
+        composeInfo.project,
+        composeInfo.service,
+        containerInfo,
+        envVars,
+        removedKeys,
+        signal,
+      );
     } else {
       debug(`[docker] ${containerName}: standalone`);
-      await recreateContainerCore(containerInfo, envVars, removedKeys);
+      await recreateContainerCore(containerInfo, envVars, removedKeys, signal);
     }
   } catch (err) {
     error(`[docker] ${containerName}: пересоздание не удалось: ${(err as Error).message}`);
