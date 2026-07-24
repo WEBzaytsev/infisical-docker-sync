@@ -22,6 +22,7 @@ logLevel: info         # info: только изменения/ошибки; deb
 
 services:
   - container: my-backend
+    # replicas: [my-backend-b]  # rolling recreate: primary, затем реплики
     projectId: your-project-id
     environment: dev
     # secretPath: /applications/my-backend  # папка Infisical; по умолчанию корень /

@@ -16,6 +16,7 @@ const schema = Joi.object({
   services: Joi.array().items(
     Joi.object({
       container: Joi.string().required(),
+      replicas: Joi.array().items(Joi.string()).unique().optional(),
       // M3: envFileName — только имя файла, без слешей и ..
       envFileName: Joi.string()
         .pattern(/^[^/\\]+$/, 'no path separators')

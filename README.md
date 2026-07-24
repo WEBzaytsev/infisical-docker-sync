@@ -99,7 +99,8 @@ syncInterval: 30   # интервал проверки, секунды (мини
 logLevel: "info"   # info: изменения/ошибки; debug: каждая проверка; silent: без логов
 
 services:
-  - container: "my-app"              # = container_name в compose приложения
+  - container: "my-app"              # = primary container_name в compose приложения
+    replicas: ["my-app-b"]            # rolling recreate: primary, затем реплики
     envFileName: ".env"
     envDir: "/projects/my-app"       # = mount point в compose агента
     envFileOwner: "80:80"             # опционально: сохранить owner для Laravel/php-fpm и похожих случаев

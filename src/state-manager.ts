@@ -96,6 +96,7 @@ export class StateManager {
     hash: string,
     variableCount: number,
     pendingRemovedKeys?: string[],
+    pendingContainers?: string[],
   ): Promise<void> {
     const existing = this.state.services[serviceName];
     this.state.services[serviceName] = {
@@ -105,7 +106,10 @@ export class StateManager {
       variableCount,
       pendingRecreate: pendingRemovedKeys === undefined
         ? existing?.pendingRecreate
-        : { removedKeys: [...new Set(pendingRemovedKeys)] },
+        : {
+          removedKeys: [...new Set(pendingRemovedKeys)],
+          ...(pendingContainers ? { containers: [...new Set(pendingContainers)] } : {}),
+        },
     };
     await this.saveState();
     debug('состояние обновлено', { component: 'sync', target: serviceName });

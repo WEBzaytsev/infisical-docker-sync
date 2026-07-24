@@ -45,8 +45,9 @@ async function persistServiceState(
   envText: string,
   variableCount: number,
   removedKeys: string[],
+  pendingContainers?: string[],
 ): Promise<void> {
-  const stateWrite = state.updateServiceState(serviceName, envPath, envText, variableCount, removedKeys);
+  const stateWrite = state.updateServiceState(serviceName, envPath, envText, variableCount, removedKeys, pendingContainers);
   stateWritesInFlight.add(stateWrite);
   try {
     await stateWrite;
@@ -102,6 +103,8 @@ async function syncServiceOnce(
     const diff = await hasChanged(service.container, envPath, envVars);
     const pending = dependencies.state.getPendingRecreate(service.container);
 
+    const configuredContainers = [service.container, ...(service.replicas || [])];
+    const recreateContainers = pending?.containers || configuredContainers;
     const removedKeys = [...new Set([
       ...(pending?.removedKeys || []),
       ...diff.removed,
@@ -116,6 +119,7 @@ async function syncServiceOnce(
         envText,
         variableCount,
         removedKeys,
+        service.replicas ? configuredContainers : undefined,
       );
       await writeEnvFileSafely(service.container, envPath, envText, service.envFileOwner);
       const written = await fs.stat(envPath);
@@ -128,7 +132,14 @@ async function syncServiceOnce(
     }
 
     info(`${diff.hasDiff ? `записано ${variableCount} переменных` : 'повторяем неудавшееся пересоздание'}; запрашиваем пересоздание контейнера`, { component: 'sync', target: service.container });
-    await dependencies.recreateContainer(service.container, envVars, removedKeys, service.pullImage);
+    for (let index = 0; index < recreateContainers.length; index += 1) {
+      const container = recreateContainers[index];
+      await dependencies.recreateContainer(container, envVars, removedKeys, service.pullImage);
+      const remaining = recreateContainers.slice(index + 1);
+      if (remaining.length > 0) {
+        await persistServiceState(dependencies.state, service.container, envPath, envToDotenvFormat(envVars), variableCount, removedKeys, remaining);
+      }
+    }
     await clearPendingRecreate(dependencies.state, service.container);
 
     const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];

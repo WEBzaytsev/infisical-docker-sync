@@ -6,6 +6,7 @@ export interface ServiceOverrides {
 
 export interface ServiceConfig {
   container: string;
+  replicas?: string[]; // дополнительные контейнеры той же logical service
   envFileName: string;
   envDir: string; // Директория где создавать env файл (монтированная в хост)
   envFileOwner?: string; // uid:gid для atomic rewrite, например "80:80"
@@ -70,6 +71,7 @@ export interface ServiceState {
   variableCount: number;
   pendingRecreate?: {
     removedKeys: string[];
+    containers?: string[];
   };
 }
 

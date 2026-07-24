@@ -102,6 +102,47 @@ test('syncService serializes overlapping syncs for the same container', async ()
   }
 });
 
+test('syncService recreates replicas sequentially and retries only the failed replica', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ids-replicas-'));
+  const state = new StateManager(path.join(dir, 'agent-state.json'));
+  const service: ServiceConfig = {
+    container: 'back-prod-api-a',
+    replicas: ['back-prod-api-b'],
+    envDir: dir,
+    envFileName: '.env',
+    projectId: 'project-id',
+    environment: 'prod',
+  };
+  const recreated: string[] = [];
+  let failReplicaB = true;
+
+  await state.loadState();
+  try {
+    const dependencies = {
+      fetchEnv: async () => ({ KEEP: 'new' }),
+      recreateContainer: async (container: string) => {
+        recreated.push(container);
+        if (container === 'back-prod-api-b' && failReplicaB) throw new Error('replica b unavailable');
+      },
+      state,
+    };
+
+    await syncService(service, config, dependencies);
+    assert.deepEqual(recreated, ['back-prod-api-a', 'back-prod-api-b']);
+    assert.deepEqual(state.getPendingRecreate('back-prod-api-a'), {
+      removedKeys: [],
+      containers: ['back-prod-api-b'],
+    });
+
+    failReplicaB = false;
+    await syncService(service, config, dependencies);
+    assert.deepEqual(recreated, ['back-prod-api-a', 'back-prod-api-b', 'back-prod-api-b']);
+    assert.equal(state.getPendingRecreate('back-prod-api-a'), undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('syncService requests secrets from the configured Infisical folder', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'ids-folder-'));
   const state = new StateManager(path.join(dir, 'agent-state.json'));
