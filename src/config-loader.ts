@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import YAML from 'yaml';
 import { info, error } from './logger.js';
-import { LOG_LEVELS, Config } from './types.js';
+import { LOG_LEVELS, SECRET_SCOPES, Config } from './types.js';
 
 const schema = Joi.object({
   siteUrl: Joi.string().uri({ scheme: ['https', 'http'] }).required(),
@@ -16,6 +16,10 @@ const schema = Joi.object({
   services: Joi.array().items(
     Joi.object({
       container: Joi.string().required(),
+      replicas: Joi.alternatives().try(
+        Joi.string().trim().min(1),
+        Joi.array().items(Joi.string().trim().min(1)).unique().min(1),
+      ).custom((value) => typeof value === 'string' ? [value] : value).optional(),
       // M3: envFileName — только имя файла, без слешей и ..
       envFileName: Joi.string()
         .pattern(/^[^/\\]+$/, 'no path separators')
@@ -26,6 +30,8 @@ const schema = Joi.object({
       pullImage: Joi.boolean().optional(),
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
+      secretPath: Joi.string().pattern(/^\/(?:[^/]+(?:\/[^/]+)*)?$/, 'absolute Infisical folder path').default('/'),
+      secretScope: Joi.string().valid(...Object.values(SECRET_SCOPES)).default(SECRET_SCOPES.FOLDER),
       syncInterval: Joi.number().integer().min(10),
       overrides: Joi.object({
         siteUrl: Joi.string().uri({ scheme: ['https', 'http'] }),
@@ -35,6 +41,23 @@ const schema = Joi.object({
     })
   ).min(1).required(),
 });
+
+export async function formatConfigFile(configPath: string): Promise<boolean> {
+  const source = await fs.readFile(configPath, 'utf8');
+  const document = YAML.parseDocument(source);
+  const formattedYaml = document.toString({ indent: 2, lineWidth: 0 });
+  const formatted = formattedYaml
+    .split('\n')
+    .flatMap((line, index, lines) => (
+      line.startsWith('  - container:') && index > 0 && lines[index - 1] !== 'services:' && lines[index - 1] !== ''
+        ? ['', line]
+        : [line]
+    ))
+    .join('\n');
+  if (formatted === source) return false;
+  await fs.writeFile(configPath, formatted, 'utf8');
+  return true;
+}
 
 function isLocalHttpUrl(value: string): boolean {
   const url = new URL(value);
@@ -90,6 +113,7 @@ export async function loadConfig(configPath: string): Promise<Config> {
 
     const config = value as Config;
     assertSafeInfisicalUrls(config);
+    await formatConfigFile(absolutePath);
 
     info(`config.yaml загружен: ${config.services.length} сервисов (${absolutePath})`, { component: 'config' });
     return config;

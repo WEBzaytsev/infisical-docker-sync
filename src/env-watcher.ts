@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { info, error, debug } from './logger.js';
 import { stateManager } from './state-manager.js';
-import { parseDotenvContent } from './env-format.js';
+import { parseDotenvContent, envToDotenvFormat } from './env-format.js';
 import { EnvVars } from './types.js';
 
 function diffEnvVars(
@@ -25,6 +25,7 @@ function diffEnvVars(
 
 export interface EnvDiff {
   hasDiff: boolean;
+  needsRewrite: boolean;
   added: string[];
   removed: string[];
   changed: string[];
@@ -50,13 +51,15 @@ export async function hasChanged(
     } catch {
       debug('файл не найден', { component: 'sync', target: serviceName });
       info('.env отсутствует — создаём из секретов Infisical', { component: 'sync', target: serviceName });
-      return { hasDiff: true, added: Object.keys(envVars), removed: [], changed: [] };
+      return { hasDiff: true, needsRewrite: true, added: Object.keys(envVars), removed: [], changed: [] };
     }
 
     const { added, removed, changed } = diffEnvVars(diskVars, envVars);
-    const hasDiff = added.length > 0 || removed.length > 0 || changed.length > 0;
+    const needsRewrite = diskContent !== envToDotenvFormat(envVars);
+    const hasValueDiff = added.length > 0 || removed.length > 0 || changed.length > 0;
+    const hasDiff = hasValueDiff || needsRewrite;
 
-    if (hasDiff) {
+    if (hasValueDiff) {
       if (added.length > 0) debug(`добавлены: ${added.join(', ')}`, { component: 'sync', target: serviceName });
       if (removed.length > 0) debug(`удалены: ${removed.join(', ')}`, { component: 'sync', target: serviceName });
       if (changed.length > 0) debug(`изменены: ${changed.join(', ')}`, { component: 'sync', target: serviceName });
@@ -64,17 +67,19 @@ export async function hasChanged(
         `секреты изменились (+${added.length} −${removed.length} ~${changed.length}), обновляем .env`,
         { component: 'sync', target: serviceName },
       );
+    } else if (needsRewrite) {
+      info('формат .env неканоничный — переписываем в Compose-safe формате', { component: 'sync', target: serviceName });
     } else {
       const diskHash = crypto.createHash('sha256').update(diskContent).digest('hex').slice(0, 12);
-      const remoteContent = Object.entries(envVars).map(([k, v]) => `${k}=${v}`).sort().join('\n');
+      const remoteContent = envToDotenvFormat(envVars);
       const remoteHash = crypto.createHash('sha256').update(remoteContent).digest('hex').slice(0, 12);
       debug(`секреты актуальны (${Object.keys(envVars).length} переменных); хэш диска=${diskHash}, Infisical=${remoteHash}`, { component: 'sync', target: serviceName });
     }
 
-    return { hasDiff, added, removed, changed };
+    return { hasDiff, needsRewrite, added, removed, changed };
   } catch (err) {
     error(`не удалось сравнить .env с Infisical: ${(err as Error).message}`, { component: 'sync', target: serviceName });
-    return { hasDiff: true, added: [], removed: [], changed: [] };
+    return { hasDiff: true, needsRewrite: true, added: [], removed: [], changed: [] };
   }
 }
 

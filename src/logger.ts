@@ -9,6 +9,7 @@ export type LogComponent = 'config' | 'docker' | 'infisical' | 'proxy' | 'state'
 export interface LogContext {
   component: LogComponent;
   target?: string;
+  details?: Record<string, unknown>;
 }
 
 export function formatLogMessage(context: LogContext, message: string): string {
@@ -16,8 +17,10 @@ export function formatLogMessage(context: LogContext, message: string): string {
   return `[${context.component}]${target} ${message}`;
 }
 
+const configuredLogLevel = process.env.DEBUG?.toLowerCase() === 'true' ? LOG_LEVELS.DEBUG : LOG_LEVELS.INFO;
+
 const logger = pino({
-  level: LOG_LEVELS.INFO,
+  level: configuredLogLevel,
   base: { service: containerName },
   ...(prettyLogs ? {
     transport: {
@@ -38,7 +41,7 @@ function write(level: 'debug' | 'info' | 'warn' | 'error', message: string, cont
     logger[level](message);
     return;
   }
-  logger[level](context, formatLogMessage(context, message));
+  logger[level]({ component: context.component, target: context.target, ...context.details }, formatLogMessage(context, message));
 }
 
 export function setLogLevel(level?: string): void {

@@ -1,3 +1,10 @@
+export const SECRET_SCOPES = {
+  FOLDER: 'folder',
+  SUBTREE: 'subtree',
+} as const;
+
+export type SecretScope = typeof SECRET_SCOPES[keyof typeof SECRET_SCOPES];
+
 export interface ServiceOverrides {
   siteUrl?: string;
   clientId?: string;
@@ -6,12 +13,15 @@ export interface ServiceOverrides {
 
 export interface ServiceConfig {
   container: string;
+  replicas?: string[]; // дополнительные контейнеры той же logical service
   envFileName: string;
   envDir: string; // Директория где создавать env файл (монтированная в хост)
   envFileOwner?: string; // uid:gid для atomic rewrite, например "80:80"
   pullImage?: boolean; // перед пересозданием скачать свежий image из registry
   projectId: string;
   environment: string;
+  secretPath: string; // папка Infisical, например /applications/my-app
+  secretScope: SecretScope;
   syncInterval?: number;
   overrides?: ServiceOverrides;
 }
@@ -31,17 +41,18 @@ export interface InfisicalCredentials {
   clientSecret: string;
   projectId: string;
   environment: string;
+  secretPath: string;
+  secretScope: SecretScope;
 }
 
 export interface EnvVars {
   [key: string]: string;
 }
 
-export interface SecretResponse {
-  secrets: Array<{
-    secretKey: string;
-    secretValue: string;
-  }>;
+export interface SecretRecord {
+  secretKey: string;
+  secretValue: string;
+  secretPath?: string;
 }
 
 export type LogLevel = 'debug' | 'info' | 'silent';
@@ -68,6 +79,7 @@ export interface ServiceState {
   variableCount: number;
   pendingRecreate?: {
     removedKeys: string[];
+    containers?: string[];
   };
 }
 

@@ -29,11 +29,15 @@ RUN mkdir -p /app/data && chown 65532:65532 /app/data
 # distroless: нет shell, нет apt, нет утилит — минимальный attack surface.
 # nonroot пользователь uid/gid 65532 и CA-сертификаты уже включены в образ.
 FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:0345e4b3c7509ec058d3f6a2b38be1c4e6e487ce87883a0fd550c40df3f1d346 AS runtime
+ARG GIT_COMMIT_SHA=unknown
+ENV NODE_ENV=production
+ENV GIT_COMMIT_SHA=$GIT_COMMIT_SHA
 WORKDIR /app
 
 # M4: копируем только prod node_modules из builder — pnpm/corepack в runtime не нужны
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/proxy ./proxy
 
 # Директория для данных агента (конфиг + состояние), создана в builder с uid 65532
@@ -45,6 +49,5 @@ COPY --chown=65532:65532 config.example.yaml /app/config.example.yaml
 VOLUME ["/app/data"]
 
 USER 65532
-ENV NODE_ENV=production
 # distroless ENTRYPOINT уже ["node"], CMD добавляется как аргумент
 CMD ["dist/index.js"]

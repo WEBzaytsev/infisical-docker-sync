@@ -5,6 +5,7 @@ import { hasChanged, ensureEnvDir, writeEnvFileSafely } from './env-watcher.js';
 import { recreateContainer } from './docker-manager.js';
 import { watchConfig } from './config-watcher.js';
 import { setLogLevel, info, debug, error, warn } from './logger.js';
+import { formatStartupMessage } from './build-info.js';
 import { stateManager, StateManager } from './state-manager.js';
 
 import fs from 'fs/promises';
@@ -45,8 +46,9 @@ async function persistServiceState(
   envText: string,
   variableCount: number,
   removedKeys: string[],
+  pendingContainers?: string[],
 ): Promise<void> {
-  const stateWrite = state.updateServiceState(serviceName, envPath, envText, variableCount, removedKeys);
+  const stateWrite = state.updateServiceState(serviceName, envPath, envText, variableCount, removedKeys, pendingContainers);
   stateWritesInFlight.add(stateWrite);
   try {
     await stateWrite;
@@ -78,10 +80,11 @@ async function syncServiceOnce(
       siteUrl: service.overrides?.siteUrl || globalConfig.siteUrl,
       clientId: service.overrides?.clientId || globalConfig.clientId,
       clientSecret: service.overrides?.clientSecret || globalConfig.clientSecret,
-      environment: service.environment,
       projectId: service.projectId,
+      environment: service.environment,
+      secretPath: service.secretPath,
+      secretScope: service.secretScope,
     };
-
     const envVars = await dependencies.fetchEnv(creds);
 
     if (Object.keys(envVars).length === 0) {
@@ -102,6 +105,8 @@ async function syncServiceOnce(
     const diff = await hasChanged(service.container, envPath, envVars);
     const pending = dependencies.state.getPendingRecreate(service.container);
 
+    const configuredContainers = [service.container, ...(service.replicas || [])];
+    const recreateContainers = pending?.containers || configuredContainers;
     const removedKeys = [...new Set([
       ...(pending?.removedKeys || []),
       ...diff.removed,
@@ -116,6 +121,7 @@ async function syncServiceOnce(
         envText,
         variableCount,
         removedKeys,
+        service.replicas ? configuredContainers : undefined,
       );
       await writeEnvFileSafely(service.container, envPath, envText, service.envFileOwner);
       const written = await fs.stat(envPath);
@@ -128,7 +134,14 @@ async function syncServiceOnce(
     }
 
     info(`${diff.hasDiff ? `записано ${variableCount} переменных` : 'повторяем неудавшееся пересоздание'}; запрашиваем пересоздание контейнера`, { component: 'sync', target: service.container });
-    await dependencies.recreateContainer(service.container, envVars, removedKeys, service.pullImage);
+    for (let index = 0; index < recreateContainers.length; index += 1) {
+      const container = recreateContainers[index];
+      await dependencies.recreateContainer(container, envVars, removedKeys, service.pullImage);
+      const remaining = recreateContainers.slice(index + 1);
+      if (remaining.length > 0) {
+        await persistServiceState(dependencies.state, service.container, envPath, envToDotenvFormat(envVars), variableCount, removedKeys, remaining);
+      }
+    }
     await clearPendingRecreate(dependencies.state, service.container);
 
     const changedKeys = [...diff.added, ...diff.changed, ...diff.removed];
@@ -204,6 +217,7 @@ async function recreateConfig(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  info(formatStartupMessage('infisical-docker-sync'), { component: 'config' });
   info('запуск агента; загружаем config.yaml', { component: 'config' });
 
   const examplePath = '/app/config.example.yaml';

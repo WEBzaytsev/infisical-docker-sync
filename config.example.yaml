@@ -17,13 +17,20 @@
 siteUrl: https://app.infisical.com
 clientId: your-client-id
 clientSecret: your-client-secret
-syncInterval: 60       # секунды, минимум 10
-logLevel: info         # info: только изменения/ошибки; debug: каждая проверка; silent: без логов
+syncInterval: 60 # секунды, минимум 10
+logLevel: info # info: только изменения/ошибки; debug: каждая проверка; silent: без логов
 
 services:
   - container: my-backend
+    # replicas: my-backend-b       # одну реплику можно указать строкой
+    # Для нескольких реплик:
+    # replicas:
+    #   - my-backend-b
+    #   - my-backend-d
     projectId: your-project-id
     environment: dev
+    secretPath: /applications/my-backend # путь папки Infisical
+    secretScope: folder # только эта папка; subtree — ещё и вложенные папки
     envDir: /app/data/envs
     envFileName: .env
     # envFileOwner: "80:80"  # опционально: сохранить owner файла для Laravel/php-fpm

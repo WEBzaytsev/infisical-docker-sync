@@ -1,7 +1,7 @@
 # Infisical Docker Sync + recreate-proxy
 #
 # Шаг 1: cp docker-compose.example.yml docker-compose.yml
-# Шаг 2: создайте .env — PROXY_TOKEN (openssl rand -hex 32), DOCKER_GID (stat -c '%g' /var/run/docker.sock)
+# Шаг 2: cp .env.example .env и задайте PROXY_TOKEN (openssl rand -hex 32), DOCKER_GID (stat -c '%g' /var/run/docker.sock)
 # Шаг 3: mkdir -p data && docker compose up -d
 # Шаг 4: отредактируйте data/config.yaml (создастся из примера при первом старте)
 # Шаг 5: замените volume ниже на каталоги ваших приложений (где лежит .env)
@@ -15,6 +15,7 @@ services:
     environment:
       - PROXY_TOKEN=${PROXY_TOKEN}
       - CONTAINER_NAME=recreate-proxy
+      - DEBUG=${RECREATE_PROXY_DEBUG:-false}  # true — подробные debug-логи proxy
       # Для приватного registry: auth config используется только сервисами с pullImage: true в config.yaml.
       # - DOCKER_AUTH_CONFIG_FILE=/run/docker-auth/config.json
     volumes:

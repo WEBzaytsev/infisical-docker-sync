@@ -1,9 +1,10 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import Joi from 'joi';
+import { formatStartupMessage } from '../build-info.js';
 import { recreateContainer } from './docker-recreate.js';
 import { tokenValid, validateProxyToken } from './security.js';
-import { info, error } from '../logger.js';
+import { info, debug, warn, error } from '../logger.js';
 import { RecreateRequest } from '../types.js';
 
 const DEFAULT_PORT = 8080;
@@ -134,6 +135,7 @@ async function handleRecreate(
   recreate: RecreateHandler,
 ): Promise<void> {
   if (!tokenValid(token, headerToken(req.headers['x-proxy-token']))) {
+    warn('отклонён запрос: неверный или отсутствующий токен', { component: 'proxy' });
     sendJson(res, HTTP_STATUS.UNAUTHORIZED, {
       ok: false,
       code: RESPONSE_CODES.UNAUTHORIZED,
@@ -185,6 +187,8 @@ async function handleRecreate(
   }
 
   const { container, env, removed, pullImage } = value as RecreateRequest;
+  const startedAt = Date.now();
+  debug(`запрос принят: env=${env ? Object.keys(env).length : 0}, removed=${removed?.length ?? 0}, pullImage=${pullImage === true}`, { component: 'proxy', target: container });
   const abortController = new AbortController();
   const abortRecreate = (): void => abortController.abort();
   req.once('aborted', abortRecreate);
@@ -193,9 +197,15 @@ async function handleRecreate(
   try {
     await recreate(container, env, removed, pullImage, abortController.signal);
     if (!abortController.signal.aborted) {
+      info(`пересоздание завершено за ${Date.now() - startedAt} мс`, { component: 'proxy', target: container });
       sendJson(res, HTTP_STATUS.OK, { ok: true, code: RESPONSE_CODES.OK });
     }
   } catch (err) {
+    if (abortController.signal.aborted) {
+      debug(`пересоздание отменено после ${Date.now() - startedAt} мс`, { component: 'proxy', target: container });
+    } else {
+      error(`пересоздание не удалось за ${Date.now() - startedAt} мс: ${(err as Error).message}`, { component: 'proxy', target: container });
+    }
     if (!abortController.signal.aborted) {
       sendJson(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
         ok: false,
@@ -252,6 +262,7 @@ export function createProxyServer(options: ProxyServerOptions = {}): http.Server
 
 export function startProxyServer(port = Number(process.env.PROXY_PORT) || DEFAULT_PORT): http.Server {
   const server = createProxyServer();
+  info(formatStartupMessage('recreate-proxy'), { component: 'proxy' });
   server.listen(port, () => {
     info(`proxy для пересоздания слушает порт ${port}`, { component: 'proxy' });
   });

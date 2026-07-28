@@ -57,11 +57,24 @@ cp docker-compose.example.yml docker-compose.yml
 mkdir -p data
 ```
 
-Создайте `.env` рядом с compose:
+Создайте `.env` рядом с compose из шаблона:
 
 ```bash
-PROXY_TOKEN=<вывод openssl rand -hex 32>  # минимум 32 символа, лучше 64 hex
-DOCKER_GID=999                              # stat -c '%g' /var/run/docker.sock
+cp .env.example .env
+```
+
+Шаблон содержит только безопасные placeholders для `PROXY_TOKEN`, `DOCKER_GID` и переключателя debug-логов. Токен сгенерируйте отдельно:
+
+```bash
+openssl rand -hex 32
+```
+
+Минимальное содержимое `.env`:
+
+```dotenv
+PROXY_TOKEN=<результат openssl rand -hex 32>
+DOCKER_GID=999                       # stat -c '%g' /var/run/docker.sock
+RECREATE_PROXY_DEBUG=false          # true — подробные логи proxy
 ```
 
 Запустите:
@@ -77,7 +90,8 @@ docker compose up -d
 ```
 ./
 ├── docker-compose.yml
-├── .env                         # PROXY_TOKEN, DOCKER_GID
+├── .env                         # PROXY_TOKEN, DOCKER_GID, RECREATE_PROXY_DEBUG
+├── .env.example                 # безопасный шаблон переменных Compose
 ├── data/
 │   └── config.yaml              # конфиг агента
 └── ~/projects/
@@ -99,12 +113,19 @@ syncInterval: 30   # интервал проверки, секунды (мини
 logLevel: "info"   # info: изменения/ошибки; debug: каждая проверка; silent: без логов
 
 services:
-  - container: "my-app"              # = container_name в compose приложения
+  - container: "my-app"              # = primary container_name в compose приложения
+    replicas: "my-app-b"            # одну реплику можно указать строкой
+    # Для нескольких реплик используйте массив:
+    # replicas:
+    #   - "my-app-b"
+    #   - "my-app-d"
     envFileName: ".env"
     envDir: "/projects/my-app"       # = mount point в compose агента
     envFileOwner: "80:80"             # опционально: сохранить owner для Laravel/php-fpm и похожих случаев
     projectId: "project-id-из-infisical"
     environment: "prod"
+    secretPath: "/applications/my-app"  # путь папки Infisical
+    secretScope: "folder"              # режим: folder или subtree
 
   - container: "my-worker"
     envFileName: ".env"
@@ -114,6 +135,32 @@ services:
 ```
 
 Полный пример с комментариями — в [`config.example.yaml`](config.example.yaml).
+
+Для сервиса, которому нужна только папка `/worker`, конфигурация выглядит так:
+
+```yaml
+services:
+  - container: "my-worker"
+    envFileName: ".env"
+    envDir: "/projects/my-worker"
+    projectId: "project-id-из-infisical"
+    environment: "prod"
+    secretPath: "/worker"
+    secretScope: "folder"
+```
+
+Если нужны `/worker` и все папки внутри неё, замените только режим:
+
+```yaml
+secretPath: "/worker"
+secretScope: "subtree"
+```
+
+`secretScope` — это режим (`folder` или `subtree`), а `secretPath` — путь. Не указывайте путь в `secretScope`.
+
+При `secretScope: "folder"` загрузка идёт только из указанного `secretPath`. Это предотвращает попадание одноимённых ключей из соседних папок: например, `/MIGRATIONS_IMAGE_TAG` не смешивается с `/worker/MIGRATIONS_IMAGE_TAG`. Для намеренной загрузки вложенных папок укажите `secretScope: "subtree"`. Если в выбранном scope обнаружены одинаковые ключи из разных папок, агент останавливает синхронизацию без изменения `.env` и пишет структурированную ошибку.
+
+При каждом успешном сохранении и последующей загрузке `config.yaml` агент автоматически приводит YAML к каноническому виду: отступ 2 пробела, аккуратные списки и сохранение комментариев. Невалидный конфиг не перезаписывается.
 
 ### Шаг 3. Смонтируйте каталоги приложений
 
@@ -379,6 +426,18 @@ chmod 0640 "$HOME/.credentials/infisical-docker-sync/config.json"
 | `422` | `validation_failed` | JSON валиден, но payload не соответствует схеме |
 | `500` | `recreate_failed` / `internal_error` | Ошибка Docker-пересоздания или внутренняя ошибка proxy |
 
+При каждом старте агент и `recreate-proxy` первой строкой пишут версию и commit hash в формате:
+
+`infisical-docker-sync v1.0.0 (commit abc1234)`
+
+Версия берётся из `package.json`. Hash передаётся в Docker image через build argument `GIT_COMMIT_SHA`; GitHub Actions передаёт SHA автоматически. Если локальная сборка выполняется без этого аргумента, в логах будет `commit unknown`.
+
+Для локальной сборки с текущим commit:
+
+```bash
+docker build --build-arg GIT_COMMIT_SHA="$(git rev-parse HEAD)" -t infisical-docker-sync:local .
+```
+
 ### Переменные окружения
 
 | Переменная | Сервис | Назначение |
@@ -392,6 +451,7 @@ chmod 0640 "$HOME/.credentials/infisical-docker-sync/config.json"
 | `CONFIG_PATH` | агент | Путь к config. По умолчанию `/app/data/config.yaml` |
 | `CONTAINER_NAME` | оба | Префикс в логах |
 | `DOCKER_GID` | proxy | GID группы docker для `group_add` |
+| `GIT_COMMIT_SHA` | оба | Build-time metadata: commit hash, который будет показан в startup-логе; по умолчанию `unknown` |
 
 ## Для разработчиков
 
@@ -402,7 +462,7 @@ pnpm build
 pnpm check
 pnpm lint:fix
 
-docker build -t infisical-docker-sync:local .
+docker build --build-arg GIT_COMMIT_SHA="$(git rev-parse HEAD)" -t infisical-docker-sync:local .
 ```
 
 Локальный запуск proxy (Linux, нужен `group_add` или `user: "0:0"`):
@@ -428,6 +488,7 @@ src/
 ├── config-watcher.ts     # Hot-reload конфига
 ├── state-manager.ts      # Состояние синхронизации
 ├── logger.ts
+├── build-info.ts         # Версия и commit metadata для startup-логов
 ├── types.ts
 └── proxy/
     ├── server.ts         # HTTP proxy (POST /recreate)

@@ -1,4 +1,4 @@
-import { error, debug } from './logger.js';
+import { error, info } from './logger.js';
 import { EnvVars, RecreateRequest, RecreateResponse } from './types.js';
 
 const DEFAULT_PROXY_URL = 'http://recreate-proxy:8080';
@@ -81,7 +81,7 @@ export async function recreateContainer(
       throw new Error(result.error ?? `recreate-proxy ответил с кодом ${res.status}`);
     }
 
-    debug('пересоздание выполнено через proxy', { component: 'docker', target: containerName });
+    info('контейнер успешно пересоздан через proxy', { component: 'docker', target: containerName });
   } catch (err) {
     error(`пересоздание через proxy не удалось: ${(err as Error).message}`, { component: 'docker', target: containerName });
     throw err;

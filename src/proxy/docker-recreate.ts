@@ -415,6 +415,7 @@ export async function recreateContainer(
   signal?: AbortSignal,
 ): Promise<void> {
   try {
+    debug(`начало пересоздания: env=${envVars ? Object.keys(envVars).length : 0}, removed=${removedKeys.length}, pullImage=${pullImage}`, { component: 'docker', target: containerName });
     const containers = await docker.listContainers({
       all: true,
       filters: { name: [containerName] },
