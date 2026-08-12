@@ -22,7 +22,7 @@ test('formatConfigFile applies the canonical YAML indentation and keeps comments
   }
 });
 
-test('loadConfig accepts a scalar replicas value for a single replica', async () => {
+test('loadConfig defaults to the root subtree when secret directives are omitted', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'ids-yaml-'));
   const file = path.join(dir, 'config.yaml');
   await writeFile(file, `siteUrl: https://infisical.example.com
@@ -40,6 +40,30 @@ services:
   try {
     const config = await loadConfig(file);
     assert.deepEqual(config.services[0].replicas, ['back-prod-api-b']);
+    assert.equal(config.services[0].secretPath, '/');
+    assert.equal(config.services[0].secretScope, 'subtree');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig keeps an explicit folder scope', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ids-yaml-'));
+  const file = path.join(dir, 'config.yaml');
+  await writeFile(file, `siteUrl: https://infisical.example.com
+clientId: client-id
+clientSecret: client-secret
+services:
+  - container: app
+    envFileName: .env
+    envDir: /app
+    projectId: project-id
+    environment: prod
+    secretScope: folder
+`);
+
+  try {
+    const config = await loadConfig(file);
     assert.equal(config.services[0].secretPath, '/');
     assert.equal(config.services[0].secretScope, 'folder');
   } finally {

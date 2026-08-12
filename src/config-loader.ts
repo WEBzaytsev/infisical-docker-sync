@@ -31,7 +31,7 @@ const schema = Joi.object({
       projectId: Joi.string().required(),
       environment: Joi.string().required(),
       secretPath: Joi.string().pattern(/^\/(?:[^/]+(?:\/[^/]+)*)?$/, 'absolute Infisical folder path').default('/'),
-      secretScope: Joi.string().valid(...Object.values(SECRET_SCOPES)).default(SECRET_SCOPES.FOLDER),
+      secretScope: Joi.string().valid(...Object.values(SECRET_SCOPES)).default(SECRET_SCOPES.SUBTREE),
       syncInterval: Joi.number().integer().min(10),
       overrides: Joi.object({
         siteUrl: Joi.string().uri({ scheme: ['https', 'http'] }),

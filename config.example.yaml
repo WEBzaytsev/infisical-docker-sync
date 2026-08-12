@@ -29,8 +29,10 @@ services:
     #   - my-backend-d
     projectId: your-project-id
     environment: dev
-    secretPath: /applications/my-backend # путь папки Infisical
-    secretScope: folder # только эта папка; subtree — ещё и вложенные папки
+    # По умолчанию: secretPath: / и secretScope: subtree — всё дерево проекта.
+    # Укажите folder, если нужны секреты только непосредственно из выбранной папки.
+    secretPath: /applications/my-backend # можно не указывать для корня /
+    secretScope: folder
     envDir: /app/data/envs
     envFileName: .env
     # envFileOwner: "80:80"  # опционально: сохранить owner файла для Laravel/php-fpm
