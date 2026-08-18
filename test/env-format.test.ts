@@ -3,43 +3,29 @@ import { test } from 'node:test';
 
 import { envToDotenvFormat, parseDotenvContent } from '../src/env-format.js';
 
-test('serializes Compose interpolation markers as literal single-quoted values', () => {
+test('writes values literally for Compose env_file format raw', () => {
   const env = {
     PASSWORD: 'value$HOME',
     TEMPLATE: 'value${VAR}',
     QUOTED: "it's a value",
+    SURROUNDED_QUOTES: '"literal"',
+    HASH: 'value # not a comment',
     BACKSLASH: String.raw`path\to\file`,
-    MIXED: String.raw`it's $HOME and \${VAR}`,
   };
 
   const formatted = envToDotenvFormat(env);
 
-  assert.match(formatted, /^PASSWORD='value\$HOME'$/m);
-  assert.match(formatted, /^TEMPLATE='value\${VAR}'$/m);
-  assert.match(formatted, /^QUOTED='it\\'s a value'$/m);
-  assert.match(formatted, /^BACKSLASH='path\\to\\file'$/m);
+  assert.match(formatted, /^PASSWORD=value\$HOME$/m);
+  assert.match(formatted, /^TEMPLATE=value\$\{VAR\}$/m);
+  assert.match(formatted, /^QUOTED=it's a value$/m);
+  assert.match(formatted, /^HASH=value # not a comment$/m);
+  assert.ok(formatted.includes(`BACKSLASH=${String.raw`path\to\file`}`));
   assert.deepEqual(parseDotenvContent(formatted), env);
 });
 
-test('parses Compose single-quoted literals without interpreting dollar signs or backslashes', () => {
-  const content = [
-    "PASSWORD='value$HOME'",
-    "TEMPLATE='value${VAR}'",
-    "QUOTED='it\\'s a value'",
-    String.raw`BACKSLASH='path\to\file'`,
-  ].join('\n');
-
-  assert.deepEqual(parseDotenvContent(content), {
-    PASSWORD: 'value$HOME',
-    TEMPLATE: 'value${VAR}',
-    QUOTED: "it's a value",
-    BACKSLASH: String.raw`path\to\file`,
-  });
-});
-
-test('parses existing double-quoted dotenv escapes for backward compatibility', () => {
-  assert.deepEqual(parseDotenvContent('QUOTE="a\\\"b"\nSLASH="path\\\\file"'), {
-    QUOTE: 'a"b',
-    SLASH: String.raw`path\file`,
-  });
+test('rejects multiline values instead of corrupting a raw env file', () => {
+  assert.throws(
+    () => envToDotenvFormat({ PRIVATE_KEY: 'line 1\nline 2' }),
+    /PRIVATE_KEY.*multiline/
+  );
 });

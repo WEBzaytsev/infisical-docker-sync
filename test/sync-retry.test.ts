@@ -65,7 +65,7 @@ test('syncService retries a failed recreate on the next cycle without reverting 
   }
 });
 
-test('syncService rewrites a non-canonical dotenv file when values are unchanged', async () => {
+test('syncService replaces legacy quoted dotenv values with raw values', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'ids-format-'));
   const envPath = path.join(dir, '.env');
   const state = new StateManager(path.join(dir, 'agent-state.json'));
@@ -92,7 +92,7 @@ test('syncService rewrites a non-canonical dotenv file when values are unchanged
       state,
     });
 
-    assert.equal(await readFile(envPath, 'utf8'), "PASSWORD='value$HOME'");
+    assert.equal(await readFile(envPath, 'utf8'), 'PASSWORD=value$HOME');
     assert.equal(recreateCalls, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });

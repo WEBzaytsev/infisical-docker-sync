@@ -33,7 +33,7 @@ Infisical (секреты)
 
 ### Требования
 
-- Docker и Docker Compose v2
+- Docker и Docker Compose 2.30.0+ (`env_file.format: raw`)
 - Доступ к `/var/run/docker.sock` на хосте (монтируется **только** в `recreate-proxy`)
 - Machine Identity в Infisical: Client ID и Client Secret с доступом к нужным проектам
 - Файл `.env` рядом с compose агента: `PROXY_TOKEN`, при необходимости `DOCKER_GID`
@@ -188,17 +188,23 @@ services:
   my-app:
     container_name: my-app
     image: my-app:latest
-    env_file: ./.env    # агент создаст и обновит этот файл
+    env_file:
+      - path: ./.env
+        format: raw # агент пишет значения без Compose-интерполяции
     labels:
       infisical-docker-sync.enabled: "true"
 
   my-db:
     container_name: my-db
     image: postgres:15
-    env_file: ./.env
+    env_file:
+      - path: ./.env
+        format: raw
     labels:
       infisical-docker-sync.enabled: "true"
 ```
+
+`format: raw` требует Compose 2.30.0+ и передаёт `$`, кавычки и обратные слэши без интерполяции. Не дублируйте эти ключи через `environment: KEY=${KEY}` — такой блок перекроет значение из `env_file`. Multiline-секреты в raw `env_file` не поддерживаются: агент остановит запись вместо порчи значения.
 
 Proxy откажется пересоздавать контейнер без label `infisical-docker-sync.enabled=true`. Это защита на случай утечки `PROXY_TOKEN`: token сам по себе не даёт управлять любым контейнером на Docker-хосте.
 
